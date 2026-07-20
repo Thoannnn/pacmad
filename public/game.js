@@ -114,13 +114,17 @@ import * as THREE from "three";
 
   const input = { queue: null, held: null };
   let touchStart = null;
+  let lastTapTime = 0;
+  let lastTapPos = null;
+  const DOUBLE_TAP_MS = 320;
+  const TAP_MOVE_MAX = 18;
 
   const pacman = {
     x: PAC_START.x,
     y: PAC_START.y,
     dir: DIRS.LEFT,
     next: DIRS.LEFT,
-    speed: 7.2,
+    speed: 3.6,
   };
 
   const ghosts = GHOST_DEFS.map((def) => ({
@@ -129,7 +133,7 @@ import * as THREE from "three";
     y: def.start.y,
     dir: DIRS.LEFT,
     mode: "house",
-    speed: 6.4,
+    speed: 3.2,
     eaten: false,
     decided: false,
   }));
@@ -446,7 +450,7 @@ import * as THREE from "three";
       mesh.rotation.y = gyaw;
 
       const body = mesh.userData.body;
-      const flashing = g.mode === "frightened" && frightenedTimer < 2 && Math.floor(flashTimer * 10) % 2 === 0;
+      const flashing = g.mode === "frightened" && frightenedTimer < 3.5 && Math.floor(flashTimer * 10) % 2 === 0;
 
       if (g.eaten) {
         body.visible = false;
@@ -673,7 +677,7 @@ import * as THREE from "three";
       g.mode = i === 0 ? globalMode : "house";
       g.eaten = false;
       g.decided = false;
-      g.speed = 6.4 + Math.min(level - 1, 4) * 0.15;
+      g.speed = 3.2 + Math.min(level - 1, 4) * 0.075;
     });
 
     releaseTimer = 0;
@@ -694,7 +698,7 @@ import * as THREE from "three";
     modeIndex = 0;
     modeTimer = MODE_SCHEDULE[0].duration;
     globalMode = MODE_SCHEDULE[0].mode;
-    pacman.speed = 7.2 + Math.min(level - 1, 4) * 0.12;
+    pacman.speed = 3.6 + Math.min(level - 1, 4) * 0.06;
     resetActors();
     buildMazeMeshes();
     initActors3D();
@@ -736,7 +740,7 @@ import * as THREE from "three";
   }
 
   function activateFrightened() {
-    frightenedTimer = Math.max(6 - level * 0.4, 3);
+    frightenedTimer = Math.max(14 - level * 0.6, 9);
     frightenedPoints = 200;
     ghosts.forEach((g) => {
       if (g.mode !== "house" && g.mode !== "leaving" && !g.eaten) {
@@ -1119,7 +1123,7 @@ import * as THREE from "three";
     "touchstart",
     (e) => {
       const t = e.changedTouches[0];
-      touchStart = { x: t.clientX, y: t.clientY };
+      touchStart = { x: t.clientX, y: t.clientY, t: performance.now() };
       if (state === "ready" || state === "gameover" || state === "won") onStartAction();
     },
     { passive: true }
@@ -1132,18 +1136,41 @@ import * as THREE from "three";
       const t = e.changedTouches[0];
       const dx = t.clientX - touchStart.x;
       const dy = t.clientY - touchStart.y;
+      const dist = Math.hypot(dx, dy);
+      const now = performance.now();
       touchStart = null;
-      if (Math.hypot(dx, dy) < 18) return;
-      const dir =
-        Math.abs(dx) > Math.abs(dy)
-          ? dx > 0
-            ? DIRS.RIGHT
-            : DIRS.LEFT
-          : dy > 0
-            ? DIRS.DOWN
-            : DIRS.UP;
-      input.queue = dir;
-      pacman.next = dir;
+
+      // Swipe → move
+      if (dist >= TAP_MOVE_MAX) {
+        lastTapTime = 0;
+        lastTapPos = null;
+        const dir =
+          Math.abs(dx) > Math.abs(dy)
+            ? dx > 0
+              ? DIRS.RIGHT
+              : DIRS.LEFT
+            : dy > 0
+              ? DIRS.DOWN
+              : DIRS.UP;
+        input.queue = dir;
+        pacman.next = dir;
+        return;
+      }
+
+      // Tap → double-tap jump
+      if (state === "playing") {
+        const nearLast =
+          lastTapPos &&
+          Math.hypot(t.clientX - lastTapPos.x, t.clientY - lastTapPos.y) < 56;
+        if (nearLast && now - lastTapTime <= DOUBLE_TAP_MS) {
+          lastTapTime = 0;
+          lastTapPos = null;
+          tryJump();
+          return;
+        }
+        lastTapTime = now;
+        lastTapPos = { x: t.clientX, y: t.clientY };
+      }
     },
     { passive: true }
   );
