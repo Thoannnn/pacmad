@@ -1,0 +1,26 @@
+{
+  "name": "pacmad",
+  "version": "1.0.0",
+  "description": "Pacmad — Pacman in real 3D (Three.js), deployable on Vercel",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "build": "echo 'Static game — no build step required'"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "pacman",
+    "game",
+    "three.js",
+    "3d",
+    "arcade"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2",
+    "three": "^0.170.0"
+  }
+}

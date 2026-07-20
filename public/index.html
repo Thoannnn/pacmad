@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="description" content="Pacman in real 3D — low walls, floating pellets." />
+  <meta name="theme-color" content="#000000" />
+  <title>PAC-MAN 3D</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23FFD700'/%3E%3Cpath d='M50 50 L95 25 A45 45 0 0 0 95 75 Z' fill='%23000'/%3E%3Ccircle cx='38' cy='32' r='6' fill='%23000'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <div class="shell">
+    <header class="hud">
+      <div class="hud-block">
+        <span class="label">1UP</span>
+        <span id="score">00</span>
+      </div>
+      <div class="hud-block hud-center">
+        <h1 class="brand">PAC-MAN</h1>
+      </div>
+      <div class="hud-block hud-right">
+        <span class="label">HIGH</span>
+        <span id="high-score">00</span>
+      </div>
+    </header>
+
+    <main class="stage" id="stage">
+      <div id="overlay" class="overlay">
+        <p id="overlay-title" class="overlay-title ready">READY!</p>
+        <p id="overlay-sub" class="overlay-sub">Press Enter or Tap to Start</p>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="jump-wrap">
+        <button type="button" id="jump-btn" class="jump-btn" aria-label="Jump">JUMP ␣</button>
+      </div>
+      <div id="lives" class="lives" aria-label="Lives remaining"></div>
+      <p class="hint">Arrows / WASD · Space jump · Shift pause · Esc restart</p>
+    </footer>
+  </div>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three.module.min.js"
+    }
+  }
+  </script>
+  <script type="module" src="game.js"></script>
+</body>
+</html>
