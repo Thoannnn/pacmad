@@ -574,6 +574,8 @@ import * as THREE from "three";
     return best ? { ghost: best, dist: bestD } : null;
   }
 
+  let eyeScaleSmooth = 1;
+
   function updatePacEyesLook() {
     const eyes = pacEyes || pacMesh?.userData?.eyes;
     if (!eyes || !pacMesh) return;
@@ -581,8 +583,8 @@ import * as THREE from "three";
     let lookX = 0;
     let lookY = 0;
     let lookZ = 1;
-    // Closer ghost → bigger eyes (calm at ~8 tiles, panic under ~2)
-    let eyeScale = 1;
+    // Target scale: big when close, back to 1 when far / no ghost
+    let eyeScaleTarget = 1;
     if (near) {
       const target = near.ghost;
       const dx = worldX(target.x) - pacMesh.position.x;
@@ -595,11 +597,15 @@ import * as THREE from "three";
       lookX = THREE.MathUtils.clamp(lx / len, -1, 1);
       lookY = THREE.MathUtils.clamp(dy / len, -1, 1);
       lookZ = THREE.MathUtils.clamp(lz / len, -1, 1);
-      const t = THREE.MathUtils.clamp(1 - (near.dist - 1.2) / 6.5, 0, 1);
-      eyeScale = 1 + t * t * 1.35; // up to ~2.35x when very close
+      // Full panic ~1.5 tiles; fully normal again by ~6 tiles
+      const t = THREE.MathUtils.clamp(1 - (near.dist - 1.5) / 4.5, 0, 1);
+      eyeScaleTarget = 1 + t * t * 1.35;
     }
+    // Smooth shrink/grow so eyes clearly return to normal when ghosts leave
+    eyeScaleSmooth += (eyeScaleTarget - eyeScaleSmooth) * 0.18;
+    if (eyeScaleSmooth < 1.02 && eyeScaleTarget <= 1) eyeScaleSmooth = 1;
     eyes.forEach((e) => {
-      e.white.scale.setScalar(eyeScale);
+      e.white.scale.setScalar(eyeScaleSmooth);
       e.pupil.position.set(lookX * 0.05, lookY * 0.05, 0.08 + Math.max(0, lookZ) * 0.02);
     });
   }
