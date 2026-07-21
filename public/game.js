@@ -827,15 +827,35 @@ import * as THREE from "three";
     recenterBtn.textContent = arPlaceMode ? "TAP PLACE" : "RECENTER";
   }
 
-  /** Flat on table: keep world-up. */
+  const _arCam = new THREE.Vector3();
+  const _arToCam = new THREE.Vector3();
+
+  /** Yaw so maze local +Z (Pacman / bottom of map) faces the player. */
+  function faceBoardTowardViewer(atPos) {
+    camera.getWorldPosition(_arCam);
+    _arToCam.subVectors(_arCam, atPos);
+    _arToCam.y = 0;
+    if (_arToCam.lengthSq() < 1e-6) _arToCam.set(0, 0, 1);
+    else _arToCam.normalize();
+    // local +Z → toward viewer (see maze from the bottom, not the top)
+    board.rotation.set(0, Math.atan2(_arToCam.x, _arToCam.z), 0);
+    board.quaternion.setFromEuler(board.rotation);
+  }
+
+  /** Flat on table, playable top up, Pacman-side toward viewer. */
   function applyBoardOnSurface(matrix, preview) {
     _arMat.copy(matrix);
     _arMat.decompose(_arPos, _arQuat, _arScl);
+    // Keep playable surface facing world up (never upside-down)
+    const upY = new THREE.Vector3(0, 1, 0).applyQuaternion(_arQuat).y;
     board.position.copy(_arPos);
     board.position.y += 0.002;
-    board.rotation.set(0, 0, 0);
-    board.quaternion.identity();
+    if (upY < 0) {
+      // Hit normal pointed down — lift along world up only
+      board.position.y += 0.002;
+    }
     board.scale.setScalar(AR_SCALE);
+    faceBoardTowardViewer(board.position);
     board.visible = true;
     if (!preview) {
       arPlaced = true;
@@ -861,8 +881,9 @@ import * as THREE from "three";
     _arFwd.normalize();
     board.position.copy(_arPos).addScaledVector(_arFwd, 0.55);
     board.position.y = _arPos.y - 0.42;
-    board.rotation.set(0, Math.atan2(_arFwd.x, _arFwd.z), 0);
     board.scale.setScalar(AR_SCALE);
+    // Pacman-side (+Z) toward viewer (= opposite of look direction)
+    faceBoardTowardViewer(board.position);
     board.visible = true;
     arPlaced = true;
     arPlaceMode = false;
