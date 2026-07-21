@@ -600,258 +600,26 @@ import * as THREE from "three";
     board.add(mazeRoot);
   }
 
-  function makePacmanMesh() {
-    const ch = currentCharacter();
-    const g = new THREE.Group();
-    const mat = new THREE.MeshStandardMaterial({
-      color: ch.color,
-      emissive: ch.emissive,
-      emissiveIntensity: 0.35,
-      roughness: 0.4,
+  function matStd(color, emissive, emissiveIntensity = 0.3, roughness = 0.45) {
+    return new THREE.MeshStandardMaterial({
+      color,
+      emissive,
+      emissiveIntensity,
+      roughness,
     });
-    const limbMat = new THREE.MeshStandardMaterial({
-      color: ch.limb,
-      emissive: ch.limbEm,
-      emissiveIntensity: 0.4,
-      roughness: 0.45,
-    });
+  }
 
-    const jawPivot = new THREE.Group();
-    const upper = new THREE.Mesh(
-      new THREE.SphereGeometry(0.36, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2),
-      mat
-    );
-    upper.castShadow = true;
-    const lower = new THREE.Mesh(
-      new THREE.SphereGeometry(0.36, 32, 16, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
-      mat
-    );
-    lower.castShadow = true;
-    jawPivot.add(upper);
-    jawPivot.add(lower);
+  function addSoftShadow(mesh) {
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    return mesh;
+  }
 
-    const gulletMat = new THREE.MeshBasicMaterial({
-      color: ch.id === "cinnamoroll" ? 0xffccdd : ch.id === "kuromi" ? 0x1a1020 : 0x140600,
-    });
-    const gullet = new THREE.Mesh(new THREE.SphereGeometry(0.31, 24, 18), gulletMat);
-    gullet.renderOrder = 1;
-    jawPivot.add(gullet);
-    const throat = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.33, 0.33, 0.14, 28),
-      gulletMat
-    );
-    throat.rotation.x = Math.PI / 2;
-    throat.position.z = 0.05;
-    throat.renderOrder = 2;
-    jawPivot.add(throat);
-
-    g.add(jawPivot);
-    pacUpper = upper;
-    pacLower = lower;
-    pacBody = jawPivot;
-    g.userData.bodyMat = mat;
-    g.userData.limbMat = limbMat;
-    g.userData.characterId = ch.id;
-
-    const eyeWhiteMat = new THREE.MeshStandardMaterial({
-      color: ch.id === "kuromi" ? 0xfff5aa : 0xffffff,
-    });
-    const eyePupilMat = new THREE.MeshStandardMaterial({
-      color: ch.id === "cinnamoroll" ? 0x4488cc : ch.id === "kuromi" ? 0x221133 : 0x111111,
-    });
-    pacEyes = [];
-    const eyeY = ch.id === "lady" ? 0.22 : 0.2;
-    const eyeSpread = ch.id === "cinnamoroll" ? 0.12 : 0.15;
-    [-1, 1].forEach((side) => {
-      const white = new THREE.Mesh(
-        new THREE.SphereGeometry(ch.id === "cinnamoroll" ? 0.1 : 0.13, 14, 12),
-        eyeWhiteMat
-      );
-      white.position.set(side * eyeSpread, eyeY, 0.2);
-      white.castShadow = true;
-      const pupil = new THREE.Mesh(
-        new THREE.SphereGeometry(ch.id === "cinnamoroll" ? 0.055 : 0.065, 12, 10),
-        eyePupilMat
-      );
-      pupil.position.set(0, 0, 0.08);
-      white.add(pupil);
-      // Lady lashes
-      if (ch.id === "lady") {
-        const lashMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
-        for (let i = 0; i < 3; i++) {
-          const lash = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.06, 0.01), lashMat);
-          lash.position.set((i - 1) * 0.04, 0.12, 0.05);
-          lash.rotation.z = (i - 1) * 0.35;
-          white.add(lash);
-        }
-      }
-      upper.add(white);
-      pacEyes.push({ white, pupil, side });
-    });
-
-    pacMouth = jawPivot;
-
-    // Character-specific accessories
-    if (ch.id === "lady") {
-      const bowRed = new THREE.MeshStandardMaterial({
-        color: 0xff2255,
-        emissive: 0x880022,
-        emissiveIntensity: 0.35,
-        roughness: 0.5,
-      });
-      const bow = new THREE.Group();
-      bow.position.set(0.12, 0.38, 0.05);
-      const knot = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), bowRed);
-      bow.add(knot);
-      [-1, 1].forEach((s) => {
-        const loop = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 10), bowRed);
-        loop.scale.set(1.3, 0.7, 0.45);
-        loop.position.set(s * 0.11, 0.02, 0);
-        bow.add(loop);
-      });
-      g.add(bow);
-      // Mole
-      const mole = new THREE.Mesh(
-        new THREE.SphereGeometry(0.025, 8, 6),
-        new THREE.MeshBasicMaterial({ color: 0x553311 })
-      );
-      mole.position.set(0.18, 0.05, 0.3);
-      upper.add(mole);
-      // Lip tint
-      const lip = new THREE.Mesh(
-        new THREE.TorusGeometry(0.12, 0.025, 8, 16, Math.PI),
-        new THREE.MeshBasicMaterial({ color: 0xff4477 })
-      );
-      lip.rotation.x = Math.PI / 2;
-      lip.position.set(0, -0.02, 0.28);
-      lower.add(lip);
-    }
-
-    if (ch.id === "cinnamoroll") {
-      const earMat = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        emissive: 0xaaccff,
-        emissiveIntensity: 0.2,
-        roughness: 0.55,
-      });
-      const pinkMat = new THREE.MeshStandardMaterial({
-        color: 0xffb6c8,
-        emissive: 0xff6688,
-        emissiveIntensity: 0.25,
-        roughness: 0.6,
-      });
-      [-1, 1].forEach((side) => {
-        const ear = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.42, 6, 10), earMat);
-        ear.position.set(side * 0.22, 0.42, -0.05);
-        ear.rotation.z = side * 0.55;
-        ear.rotation.x = -0.35;
-        ear.castShadow = true;
-        g.add(ear);
-        const tip = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), earMat);
-        tip.position.set(side * 0.38, 0.62, -0.18);
-        g.add(tip);
-      });
-      // Cheeks
-      [-1, 1].forEach((side) => {
-        const cheek = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), pinkMat);
-        cheek.position.set(side * 0.28, 0.02, 0.22);
-        upper.add(cheek);
-      });
-      // Tail fluff
-      const tail = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 10), earMat);
-      tail.position.set(0, -0.05, -0.4);
-      g.add(tail);
-    }
-
-    if (ch.id === "kuromi") {
-      const hoodMat = new THREE.MeshStandardMaterial({
-        color: 0x1a1228,
-        emissive: 0x441133,
-        emissiveIntensity: 0.3,
-        roughness: 0.55,
-      });
-      const pinkMat = new THREE.MeshStandardMaterial({
-        color: 0xff66aa,
-        emissive: 0xaa2255,
-        emissiveIntensity: 0.4,
-        roughness: 0.45,
-      });
-      const skullMat = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        emissive: 0xaaaaaa,
-        emissiveIntensity: 0.2,
-        roughness: 0.4,
-      });
-      // Jester hood
-      const hood = new THREE.Mesh(new THREE.SphereGeometry(0.4, 20, 16, 0, Math.PI * 2, 0, Math.PI * 0.55), hoodMat);
-      hood.position.set(0, 0.08, -0.02);
-      g.add(hood);
-      // Pointy ears / tips
-      [-1, 1].forEach((side) => {
-        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.32, 8), hoodMat);
-        tip.position.set(side * 0.28, 0.52, -0.05);
-        tip.rotation.z = side * -0.45;
-        tip.castShadow = true;
-        g.add(tip);
-        const puff = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), pinkMat);
-        puff.position.set(side * 0.4, 0.68, -0.08);
-        g.add(puff);
-      });
-      // Skull badge
-      const skull = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 10), skullMat);
-      skull.position.set(0, 0.42, 0.18);
-      g.add(skull);
-      const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 8), skullMat);
-      jaw.scale.set(1, 0.7, 0.8);
-      jaw.position.set(0, 0.34, 0.2);
-      g.add(jaw);
-      // Crossbone X
-      const boneMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-      [-1, 1].forEach((s) => {
-        const bone = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.025, 0.025), boneMat);
-        bone.position.set(0, 0.3, 0.24);
-        bone.rotation.z = s * 0.7;
-        g.add(bone);
-      });
-    }
-
-    function makeArm(side) {
-      const pivot = new THREE.Group();
-      pivot.position.set(side * 0.34, 0.02, -0.08);
-      const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.16, 4, 8), limbMat);
-      arm.rotation.z = side > 0 ? -Math.PI / 2 : Math.PI / 2;
-      arm.position.x = side * 0.14;
-      arm.castShadow = true;
-      pivot.add(arm);
-      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), limbMat);
-      hand.position.set(side * 0.28, 0, 0.02);
-      hand.castShadow = true;
-      pivot.add(hand);
-      g.add(pivot);
-      return pivot;
-    }
-
-    function makeLeg(side) {
-      const pivot = new THREE.Group();
-      pivot.position.set(side * 0.1, -0.34, -0.32);
-      const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.12, 4, 8), limbMat);
-      thigh.position.y = -0.1;
-      thigh.castShadow = true;
-      pivot.add(thigh);
-      const foot = new THREE.Mesh(new THREE.SphereGeometry(0.065, 10, 8), limbMat);
-      foot.position.set(0, -0.22, -0.04);
-      foot.castShadow = true;
-      pivot.add(foot);
-      g.add(pivot);
-      return pivot;
-    }
-
-    pacLimbs = {
-      leftArm: makeArm(-1),
-      rightArm: makeArm(1),
-      leftLeg: makeLeg(-1),
-      rightLeg: makeLeg(1),
-    };
+  function finishPacActor(g, opts) {
+    g.userData.bodyMat = opts.bodyMat;
+    g.userData.limbMat = opts.limbMat || opts.bodyMat;
+    g.userData.characterId = opts.id;
+    g.userData.useJaw = !!opts.useJaw;
     g.userData.limbs = pacLimbs;
     g.userData.eyes = pacEyes;
     g.position.y = 0.42;
@@ -859,12 +627,350 @@ import * as THREE from "three";
     return g;
   }
 
+  function makeClassicPacMesh(ch) {
+    const g = new THREE.Group();
+    const mat = matStd(ch.color, ch.emissive, 0.4, 0.35);
+    const limbMat = matStd(ch.limb, ch.limbEm, 0.4, 0.45);
+    const jawPivot = new THREE.Group();
+    const upper = addSoftShadow(
+      new THREE.Mesh(new THREE.SphereGeometry(0.36, 40, 24, 0, Math.PI * 2, 0, Math.PI / 2), mat)
+    );
+    const lower = addSoftShadow(
+      new THREE.Mesh(new THREE.SphereGeometry(0.36, 40, 24, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), mat)
+    );
+    jawPivot.add(upper, lower);
+    const gulletMat = new THREE.MeshBasicMaterial({ color: 0x140600 });
+    const gullet = new THREE.Mesh(new THREE.SphereGeometry(0.3, 24, 18), gulletMat);
+    gullet.renderOrder = 1;
+    jawPivot.add(gullet);
+    const throat = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.14, 28), gulletMat);
+    throat.rotation.x = Math.PI / 2;
+    throat.position.z = 0.05;
+    throat.renderOrder = 2;
+    jawPivot.add(throat);
+    g.add(jawPivot);
+    pacUpper = upper;
+    pacLower = lower;
+    pacBody = jawPivot;
+    pacMouth = jawPivot;
+
+    const eyeWhiteMat = matStd(0xffffff, 0xdddddd, 0.15, 0.35);
+    const eyePupilMat = matStd(0x111111, 0x000000, 0.05, 0.4);
+    pacEyes = [];
+    [-1, 1].forEach((side) => {
+      const white = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 12), eyeWhiteMat));
+      white.position.set(side * 0.14, 0.2, 0.22);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 10), eyePupilMat);
+      pupil.position.set(0, 0, 0.08);
+      white.add(pupil);
+      if (ch.id === "lady") {
+        const lashMat = new THREE.MeshBasicMaterial({ color: 0x1a0a08 });
+        for (let i = 0; i < 4; i++) {
+          const lash = new THREE.Mesh(new THREE.CapsuleGeometry(0.008, 0.055, 3, 6), lashMat);
+          lash.position.set((i - 1.5) * 0.032, 0.11 + Math.abs(i - 1.5) * 0.01, 0.04);
+          lash.rotation.z = (i - 1.5) * 0.28;
+          white.add(lash);
+        }
+      }
+      upper.add(white);
+      pacEyes.push({ white, pupil, side });
+    });
+
+    if (ch.id === "lady") {
+      // Classic Ms. Pac-Man bow — big, on top-right of head
+      const bowMat = matStd(0xff1a4d, 0xaa0022, 0.45, 0.4);
+      const bow = new THREE.Group();
+      bow.position.set(0.18, 0.42, 0.08);
+      bow.rotation.z = -0.35;
+      const knot = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10), bowMat));
+      bow.add(knot);
+      [-1, 1].forEach((s) => {
+        const loop = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 12), bowMat));
+        loop.scale.set(1.45, 0.85, 0.4);
+        loop.position.set(s * 0.13, 0.02, 0);
+        bow.add(loop);
+        const ribbon = addSoftShadow(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.14, 0.03), bowMat));
+        ribbon.position.set(s * 0.04, -0.1, 0);
+        ribbon.rotation.z = s * 0.4;
+        bow.add(ribbon);
+      });
+      g.add(bow);
+      const mole = new THREE.Mesh(
+        new THREE.SphereGeometry(0.022, 8, 6),
+        new THREE.MeshBasicMaterial({ color: 0x4a2a10 })
+      );
+      mole.position.set(0.2, 0.02, 0.3);
+      upper.add(mole);
+      const lip = new THREE.Mesh(
+        new THREE.TorusGeometry(0.11, 0.028, 8, 20, Math.PI * 0.9),
+        new THREE.MeshBasicMaterial({ color: 0xff3366 })
+      );
+      lip.rotation.x = Math.PI / 2;
+      lip.position.set(0, 0.0, 0.3);
+      lower.add(lip);
+    }
+
+    function makeArm(side) {
+      const pivot = new THREE.Group();
+      pivot.position.set(side * 0.34, 0.02, -0.08);
+      const arm = addSoftShadow(new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.15, 4, 8), limbMat));
+      arm.rotation.z = side > 0 ? -Math.PI / 2 : Math.PI / 2;
+      arm.position.x = side * 0.13;
+      pivot.add(arm);
+      const hand = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(0.065, 10, 8), limbMat));
+      hand.position.set(side * 0.26, 0, 0.02);
+      pivot.add(hand);
+      g.add(pivot);
+      return pivot;
+    }
+    function makeLeg(side) {
+      const pivot = new THREE.Group();
+      pivot.position.set(side * 0.1, -0.34, -0.3);
+      const thigh = addSoftShadow(new THREE.Mesh(new THREE.CapsuleGeometry(0.048, 0.11, 4, 8), limbMat));
+      thigh.position.y = -0.1;
+      pivot.add(thigh);
+      const foot = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), limbMat));
+      foot.position.set(0, -0.2, -0.03);
+      pivot.add(foot);
+      g.add(pivot);
+      return pivot;
+    }
+    pacLimbs = {
+      leftArm: makeArm(-1),
+      rightArm: makeArm(1),
+      leftLeg: makeLeg(-1),
+      rightLeg: makeLeg(1),
+    };
+    return finishPacActor(g, { bodyMat: mat, limbMat, id: ch.id, useJaw: true });
+  }
+
+  function makeCinnamorollMesh(ch) {
+    const g = new THREE.Group();
+    const fur = matStd(0xfff8fc, 0xb8d4ff, 0.28, 0.55);
+    const pink = matStd(0xffb7c8, 0xff6688, 0.35, 0.5);
+    const blueEye = matStd(0x3a8fd4, 0x1a5088, 0.25, 0.35);
+    const brown = matStd(0xc48a5a, 0x8a5530, 0.2, 0.55);
+
+    // Chubby body + oversized head (plush proportions)
+    const body = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(0.28, 28, 22), fur));
+    body.scale.set(1.05, 0.9, 1.0);
+    body.position.set(0, -0.08, 0);
+    g.add(body);
+    const head = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(0.4, 36, 28), fur));
+    head.position.set(0, 0.28, 0.02);
+    g.add(head);
+    pacBody = head;
+    pacUpper = null;
+    pacLower = null;
+    pacMouth = null;
+
+    // Long floppy ears — signature look
+    [-1, 1].forEach((side) => {
+      const earRoot = new THREE.Group();
+      earRoot.position.set(side * 0.18, 0.48, -0.02);
+      const upperEar = addSoftShadow(new THREE.Mesh(new THREE.CapsuleGeometry(0.1, 0.28, 6, 12), fur));
+      upperEar.rotation.z = side * 0.75;
+      upperEar.rotation.x = -0.15;
+      upperEar.position.set(side * 0.12, 0.18, 0);
+      earRoot.add(upperEar);
+      const midEar = addSoftShadow(new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.26, 6, 12), fur));
+      midEar.position.set(side * 0.3, 0.38, -0.12);
+      midEar.rotation.z = side * 1.1;
+      midEar.rotation.x = 0.55;
+      earRoot.add(midEar);
+      const tip = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 12), fur));
+      tip.position.set(side * 0.42, 0.28, -0.28);
+      earRoot.add(tip);
+      g.add(earRoot);
+    });
+
+    // Eyes — big blue ovals
+    pacEyes = [];
+    [-1, 1].forEach((side) => {
+      const white = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 12), matStd(0xffffff, 0xffffff, 0.2, 0.3)));
+      white.scale.set(0.85, 1.15, 0.7);
+      white.position.set(side * 0.13, 0.32, 0.32);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 10), blueEye);
+      pupil.scale.set(0.85, 1.1, 0.7);
+      pupil.position.set(0, 0.01, 0.06);
+      white.add(pupil);
+      const shine = new THREE.Mesh(
+        new THREE.SphereGeometry(0.025, 8, 6),
+        new THREE.MeshBasicMaterial({ color: 0xffffff })
+      );
+      shine.position.set(-0.02, 0.03, 0.1);
+      white.add(shine);
+      head.add(white);
+      pacEyes.push({ white, pupil, side });
+    });
+
+    // Cheeks + smile + swirl
+    [-1, 1].forEach((side) => {
+      const cheek = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(0.08, 12, 10), pink));
+      cheek.scale.set(1.1, 0.75, 0.6);
+      cheek.position.set(side * 0.3, 0.2, 0.28);
+      head.add(cheek);
+    });
+    const smile = new THREE.Mesh(
+      new THREE.TorusGeometry(0.07, 0.016, 8, 16, Math.PI),
+      new THREE.MeshBasicMaterial({ color: 0x5a3a2a })
+    );
+    smile.rotation.x = Math.PI / 2;
+    smile.rotation.z = Math.PI;
+    smile.position.set(0, 0.16, 0.36);
+    head.add(smile);
+    // Forehead cinnamon swirl
+    const swirl = new THREE.Group();
+    swirl.position.set(0, 0.52, 0.2);
+    for (let i = 0; i < 5; i++) {
+      const bit = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), brown));
+      const a = i * 0.7;
+      bit.position.set(Math.cos(a) * (0.02 + i * 0.025), Math.sin(a) * (0.02 + i * 0.02), 0);
+      swirl.add(bit);
+    }
+    head.add(swirl);
+
+    // Tiny stubby legs / arms / fluffy tail
+    function stub(side, isArm) {
+      const pivot = new THREE.Group();
+      if (isArm) pivot.position.set(side * 0.3, 0.0, 0.05);
+      else pivot.position.set(side * 0.12, -0.28, 0.05);
+      const limb = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(isArm ? 0.08 : 0.09, 12, 10), fur));
+      limb.scale.set(1, isArm ? 0.85 : 1.1, 1);
+      pivot.add(limb);
+      g.add(pivot);
+      return pivot;
+    }
+    pacLimbs = {
+      leftArm: stub(-1, true),
+      rightArm: stub(1, true),
+      leftLeg: stub(-1, false),
+      rightLeg: stub(1, false),
+    };
+    const tail = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(0.18, 16, 12), fur));
+    tail.position.set(0, -0.05, -0.35);
+    g.add(tail);
+
+    return finishPacActor(g, { bodyMat: fur, limbMat: fur, id: ch.id, useJaw: false });
+  }
+
+  function makeKuromiMesh(ch) {
+    const g = new THREE.Group();
+    const skin = matStd(0xf5eef5, 0xd0a0c0, 0.2, 0.45);
+    const hood = matStd(0x1c1428, 0x4a2040, 0.35, 0.5);
+    const pink = matStd(0xff5aa5, 0xcc2266, 0.45, 0.4);
+    const skullW = matStd(0xffffff, 0xcccccc, 0.25, 0.35);
+    const eyeY = matStd(0xfff3a0, 0xccaa44, 0.35, 0.35);
+
+    const body = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(0.26, 24, 18), pink));
+    body.scale.set(1.05, 0.95, 0.9);
+    body.position.set(0, -0.12, 0);
+    g.add(body);
+    // Dress fluff
+    const skirt = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(0.3, 20, 14), pink));
+    skirt.scale.set(1.15, 0.55, 1.1);
+    skirt.position.set(0, -0.22, 0);
+    g.add(skirt);
+
+    const head = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(0.38, 32, 24), skin));
+    head.position.set(0, 0.26, 0);
+    g.add(head);
+    pacBody = head;
+    pacUpper = null;
+    pacLower = null;
+    pacMouth = null;
+
+    // Jester hood covering top/back of head
+    const hoodMesh = addSoftShadow(
+      new THREE.Mesh(new THREE.SphereGeometry(0.42, 28, 20, 0, Math.PI * 2, 0, Math.PI * 0.62), hood)
+    );
+    hoodMesh.position.set(0, 0.3, -0.04);
+    g.add(hoodMesh);
+
+    // Pointy ears with pink pom-poms
+    [-1, 1].forEach((side) => {
+      const ear = addSoftShadow(new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.38, 10), hood));
+      ear.position.set(side * 0.26, 0.62, -0.02);
+      ear.rotation.z = side * -0.55;
+      ear.rotation.x = -0.1;
+      g.add(ear);
+      const pom = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(0.075, 12, 10), pink));
+      pom.position.set(side * 0.42, 0.82, -0.06);
+      g.add(pom);
+    });
+
+    // Skull badge on forehead
+    const badge = new THREE.Group();
+    badge.position.set(0, 0.42, 0.28);
+    const skull = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(0.1, 14, 12), skullW));
+    skull.scale.set(1, 0.95, 0.75);
+    badge.add(skull);
+    const chin = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 8), skullW));
+    chin.scale.set(1.1, 0.65, 0.7);
+    chin.position.set(0, -0.08, 0.02);
+    badge.add(chin);
+    [-1, 1].forEach((s) => {
+      const bone = new THREE.Mesh(new THREE.CapsuleGeometry(0.015, 0.12, 4, 6), skullW);
+      bone.position.set(0, -0.12, 0.04);
+      bone.rotation.z = s * 0.75;
+      badge.add(bone);
+    });
+    g.add(badge);
+
+    // Mischievous eyes
+    pacEyes = [];
+    [-1, 1].forEach((side) => {
+      const white = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(0.1, 14, 12), eyeY));
+      white.scale.set(1.05, 0.85, 0.7);
+      white.position.set(side * 0.12, 0.28, 0.3);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 8), matStd(0x1a1020, 0x000000, 0.1, 0.4));
+      pupil.position.set(side * 0.01, -0.01, 0.07);
+      white.add(pupil);
+      head.add(white);
+      pacEyes.push({ white, pupil, side });
+    });
+
+    // Smile / smirk
+    const smirk = new THREE.Mesh(
+      new THREE.TorusGeometry(0.08, 0.018, 8, 16, Math.PI * 0.85),
+      new THREE.MeshBasicMaterial({ color: 0x2a1520 })
+    );
+    smirk.rotation.x = Math.PI / 2;
+    smirk.rotation.z = Math.PI + 0.15;
+    smirk.position.set(0.02, 0.14, 0.34);
+    head.add(smirk);
+
+    function stub(side, isArm) {
+      const pivot = new THREE.Group();
+      if (isArm) pivot.position.set(side * 0.28, -0.02, 0.05);
+      else pivot.position.set(side * 0.1, -0.36, 0.02);
+      const limb = addSoftShadow(new THREE.Mesh(new THREE.SphereGeometry(isArm ? 0.07 : 0.08, 10, 8), skin));
+      pivot.add(limb);
+      g.add(pivot);
+      return pivot;
+    }
+    pacLimbs = {
+      leftArm: stub(-1, true),
+      rightArm: stub(1, true),
+      leftLeg: stub(-1, false),
+      rightLeg: stub(1, false),
+    };
+
+    return finishPacActor(g, { bodyMat: skin, limbMat: skin, id: ch.id, useJaw: false });
+  }
+
+  function makePacmanMesh() {
+    const ch = currentCharacter();
+    if (ch.id === "cinnamoroll") return makeCinnamorollMesh(ch);
+    if (ch.id === "kuromi") return makeKuromiMesh(ch);
+    return makeClassicPacMesh(ch);
+  }
+
   function setPacMouthOpen(halfGap) {
-    if (!pacUpper || !pacLower) return;
+    if (!pacMesh?.userData?.useJaw || !pacUpper || !pacLower) return;
     const gap = THREE.MathUtils.clamp(halfGap, 0.08, 0.85);
     if (Math.abs(gap - lastMouthGap) < 0.02) return;
     lastMouthGap = gap;
-    // Horizontal bite: jaws hinge on X so the opening faces +Z
     pacUpper.rotation.x = -gap;
     pacLower.rotation.x = gap;
   }
@@ -1029,11 +1135,16 @@ import * as THREE from "three";
     // Mouth opens forward (+Z wedge), not downward
     if (state === "dying") {
       setPacMouthOpen(0.95);
-    } else if (state === "won") {
-      setPacMouthOpen(0.35 + Math.abs(Math.sin(mouthPhase * 1.6)) * 0.55);
-    } else {
-      const halfGap = 0.22 + Math.abs(Math.sin(mouthPhase)) * 0.55;
-      setPacMouthOpen(halfGap);
+    } else if (pacMesh.userData.useJaw) {
+      if (state === "won") {
+        setPacMouthOpen(0.35 + Math.abs(Math.sin(mouthPhase * 1.6)) * 0.55);
+      } else {
+        setPacMouthOpen(0.22 + Math.abs(Math.sin(mouthPhase)) * 0.55);
+      }
+    } else if (pacBody) {
+      // Plush characters: cute head bob instead of chomp
+      const bob = Math.sin(mouthPhase * (state === "won" ? 2.2 : 1.4)) * 0.04;
+      pacBody.position.y = (pacMesh.userData.characterId === "kuromi" ? 0.26 : 0.28) + bob;
     }
     updatePacEyesLook();
 
