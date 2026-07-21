@@ -5,7 +5,8 @@ import * as THREE from "three";
 
   const COLS = 28;
   const ROWS = 31;
-  const WALL_H = 0.38; // low walls — pellets float clearly above
+  const WALL_H = 0.38; // base block height — taller walls appear on later levels
+  const WALL_H_MAX = WALL_H * 2;
   const PELLET_Y = 0.62; // mid-air above walls, readable from far
   const POWER_Y = 0.7;
   const CAM_HEIGHT = 14;
@@ -371,16 +372,44 @@ import * as THREE from "three";
     pelletMeshes.clear();
   }
 
+  /** Stable 0..1 hash from cell + level */
+  function cellRand(x, y, salt) {
+    const n = Math.sin(x * 12.9898 + y * 78.233 + level * 45.164 + salt * 19.19) * 43758.5453;
+    return n - Math.floor(n);
+  }
+
+  /**
+   * Wall block height for this level:
+   * each level above 1, another ~1/4 of blocks rise (random), up to 2× base height.
+   * L1 = all base · L2 ≈ 25% tall · L3 ≈ 50% · L4 ≈ 75% · L5+ ≈ 100%
+   */
+  function wallHeightFor(x, y) {
+    if (level <= 1) return WALL_H;
+    const riseChance = Math.min(1, (level - 1) * 0.25);
+    if (cellRand(x, y, 1) > riseChance) return WALL_H;
+    // Rising blocks: somewhere between base and double
+    const t = cellRand(x, y, 2);
+    return WALL_H + (WALL_H_MAX - WALL_H) * (0.4 + t * 0.6);
+  }
+
   function buildMazeMeshes() {
     clearMazeMeshes();
     mazeRoot = new THREE.Group();
 
     const floorGeo = new THREE.BoxGeometry(1, 0.08, 1);
-    const wallGeo = new THREE.BoxGeometry(0.92, WALL_H, 0.92);
     const topGeo = new THREE.BoxGeometry(0.96, 0.04, 0.96);
     const pelletGeo = new THREE.SphereGeometry(0.14, 12, 10);
     const powerGeo = new THREE.SphereGeometry(0.26, 14, 12);
     const gateGeo = new THREE.BoxGeometry(0.9, 0.06, 0.12);
+    const wallGeoCache = new Map(); // height key → geometry
+
+    function wallGeoFor(h) {
+      const key = h.toFixed(3);
+      if (!wallGeoCache.has(key)) {
+        wallGeoCache.set(key, new THREE.BoxGeometry(0.92, h, 0.92));
+      }
+      return wallGeoCache.get(key);
+    }
 
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < COLS; x++) {
@@ -396,13 +425,14 @@ import * as THREE from "three";
         }
 
         if (t === 1) {
-          const wall = new THREE.Mesh(wallGeo, wallMat);
-          wall.position.set(wx, WALL_H / 2, wz);
+          const h = wallHeightFor(x, y);
+          const wall = new THREE.Mesh(wallGeoFor(h), wallMat);
+          wall.position.set(wx, h / 2, wz);
           wall.castShadow = true;
           wall.receiveShadow = true;
           mazeRoot.add(wall);
           const top = new THREE.Mesh(topGeo, wallTopMat);
-          top.position.set(wx, WALL_H + 0.02, wz);
+          top.position.set(wx, h + 0.02, wz);
           mazeRoot.add(top);
         } else if (t === 2 || t === 3) {
           const power = t === 3;
@@ -414,7 +444,6 @@ import * as THREE from "three";
           mazeRoot.add(mesh);
           pelletMeshes.set(`${x},${y}`, mesh);
 
-          // Stem + floor mark so height reads from far away
           const stem = new THREE.Mesh(
             new THREE.CylinderGeometry(power ? 0.03 : 0.02, power ? 0.03 : 0.02, py, 6),
             new THREE.MeshBasicMaterial({ color: 0x664422, transparent: true, opacity: 0.45 })
@@ -441,7 +470,6 @@ import * as THREE from "three";
       }
     }
 
-    // Outer rim base
     const base = new THREE.Mesh(
       new THREE.BoxGeometry(COLS + 1.2, 0.2, ROWS + 1.2),
       new THREE.MeshStandardMaterial({ color: 0x050520, roughness: 0.85 })
