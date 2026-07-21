@@ -3286,7 +3286,7 @@ import * as THREE from "three";
   stage.addEventListener(
     "touchend",
     (e) => {
-      if (state === "entername") {
+      if (state === "entername" || state === "levelselect") {
         touchStart = null;
         return;
       }
