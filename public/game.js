@@ -1953,19 +1953,23 @@ import * as THREE from "three";
     hideScoreboard();
   }
 
+  function normalizeHiscores(raw) {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((e) => e && typeof e.score === "number" && typeof e.name === "string")
+      .map((e) => ({
+        name: String(e.name).toUpperCase().padEnd(NAME_LEN).slice(0, NAME_LEN),
+        score: Math.max(0, Math.floor(e.score)),
+      }))
+      .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+      .slice(0, HS_MAX);
+  }
+
   function loadHiscores() {
     try {
       const raw = JSON.parse(localStorage.getItem(HS_KEY) || "[]");
-      if (Array.isArray(raw) && raw.length) {
-        return raw
-          .filter((e) => e && typeof e.score === "number" && typeof e.name === "string")
-          .map((e) => ({
-            name: String(e.name).toUpperCase().padEnd(NAME_LEN).slice(0, NAME_LEN),
-            score: Math.max(0, Math.floor(e.score)),
-          }))
-          .sort((a, b) => b.score - a.score)
-          .slice(0, HS_MAX);
-      }
+      const list = normalizeHiscores(raw);
+      if (list.length) return list;
     } catch (_) {
       /* ignore */
     }
@@ -1973,11 +1977,57 @@ import * as THREE from "three";
     return [];
   }
 
-  function saveHiscores() {
-    localStorage.setItem(HS_KEY, JSON.stringify(hiscores));
+  function applyHiscores(list, { saveLocal = true } = {}) {
+    hiscores = normalizeHiscores(list);
     if (hiscores.length) {
       highScore = hiscores[0].score;
+      highEl.textContent = formatScore(highScore);
       localStorage.setItem("pacman-high", String(highScore));
+    }
+    if (saveLocal) localStorage.setItem(HS_KEY, JSON.stringify(hiscores));
+  }
+
+  function saveHiscores() {
+    applyHiscores(hiscores, { saveLocal: true });
+  }
+
+  async function fetchRemoteHiscores() {
+    try {
+      const r = await fetch("/api/scores", { cache: "no-store" });
+      if (!r.ok) return null;
+      const data = await r.json();
+      return normalizeHiscores(data.scores);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function submitRemoteScore(name, scoreValue) {
+    try {
+      const r = await fetch("/api/scores", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, score: scoreValue }),
+      });
+      if (!r.ok) return null;
+      const data = await r.json();
+      return {
+        scores: normalizeHiscores(data.scores),
+        rank: typeof data.rank === "number" ? data.rank : -1,
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function syncHiscoresFromServer() {
+    const remote = await fetchRemoteHiscores();
+    if (!remote) return;
+    applyHiscores(remote);
+    if (state === "gameover" || state === "ready") {
+      if (scoreboardEl && !scoreboardEl.classList.contains("hidden")) {
+        renderScoreboard();
+      }
     }
   }
 
@@ -2070,12 +2120,14 @@ import * as THREE from "three";
     renderNameSlots();
   }
 
-  function confirmNameEntry() {
+  async function confirmNameEntry() {
+    if (state !== "entername") return;
     const name = nameChars.join("").toUpperCase().padEnd(NAME_LEN).slice(0, NAME_LEN);
-    hiscores.push({ name, score });
+    const scoreValue = score;
+    hiscores.push({ name, score: scoreValue });
     hiscores.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
     hiscores = hiscores.slice(0, HS_MAX);
-    lastEnteredRank = hiscores.findIndex((e) => e.name === name && e.score === score);
+    lastEnteredRank = hiscores.findIndex((e) => e.name === name && e.score === scoreValue);
     saveHiscores();
     updateHud();
     hideNameEntry();
@@ -2084,6 +2136,14 @@ import * as THREE from "three";
     renderScoreboard(name);
     setMusicMood("gameover");
     beep(660, 0.08, "square", 0.03);
+
+    const remote = await submitRemoteScore(name, scoreValue);
+    if (remote && remote.scores) {
+      applyHiscores(remote.scores);
+      if (remote.rank >= 0) lastEnteredRank = remote.rank;
+      if (state === "gameover") renderScoreboard(name);
+      updateHud();
+    }
   }
 
   function handleNameEntryKey(e) {
@@ -2761,6 +2821,7 @@ import * as THREE from "three";
   hiscores = loadHiscores();
   if (hiscores.length) highScore = hiscores[0].score;
   highEl.textContent = formatScore(highScore);
+  syncHiscoresFromServer();
   updateJumpHud();
   updateToneHud();
   setupToneHud();

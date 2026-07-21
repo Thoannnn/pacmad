@@ -20,6 +20,8 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@upstash/redis": "^1.38.0",
+    "@vercel/blob": "^2.6.1",
     "express": "^4.21.2",
     "three": "^0.170.0"
   }
