@@ -416,7 +416,23 @@ import * as THREE from "three";
       const ch = row[x + dx];
       if (ch === "4") return false;
     }
-    return true;
+    // Only walls that already touch the playable circuit (no isolated holes)
+    return touchesCircuit(x, y);
+  }
+
+  function isWalkableTemplate(x, y) {
+    if (y < 0 || y >= ROWS || x < 0 || x >= COLS) return false;
+    const ch = MAZE_TEMPLATE[y][x];
+    return ch === "0" || ch === "2" || ch === "3" || ch === "5";
+  }
+
+  function touchesCircuit(x, y) {
+    return (
+      isWalkableTemplate(x + 1, y) ||
+      isWalkableTemplate(x - 1, y) ||
+      isWalkableTemplate(x, y + 1) ||
+      isWalkableTemplate(x, y - 1)
+    );
   }
 
   /**
