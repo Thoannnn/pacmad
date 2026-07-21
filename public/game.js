@@ -5,8 +5,8 @@ import * as THREE from "three";
 
   const COLS = 28;
   const ROWS = 31;
-  const WALL_H = 0.38; // base block height — taller walls appear on later levels
-  const WALL_H_MAX = WALL_H * 2;
+  const WALL_H = 0.38; // standard block height
+  const WALL_H_MAX = WALL_H * 2; // raised blocks (level 2+)
   const PELLET_Y = 0.62; // mid-air above walls, readable from far
   const POWER_Y = 0.7;
   const CAM_HEIGHT = 14;
@@ -401,18 +401,32 @@ import * as THREE from "three";
     return n - Math.floor(n);
   }
 
+  /** Outer rim + ghost-house walls stay solid (no vanishing passages). */
+  function canMutateWall(x, y) {
+    if (x <= 0 || y <= 0 || x >= COLS - 1 || y >= ROWS - 1) return false;
+    for (const [dx, dy] of [
+      [0, 0],
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ]) {
+      const row = MAZE_TEMPLATE[y + dy];
+      if (!row) continue;
+      const ch = row[x + dx];
+      if (ch === "4") return false;
+    }
+    return true;
+  }
+
   /**
-   * Wall block height for this level:
-   * each level above 1, another ~1/4 of blocks rise (random), up to 2× base height.
-   * L1 = all base · L2 ≈ 25% tall · L3 ≈ 50% · L4 ≈ 75% · L5+ ≈ 100%
+   * From level 2: ~1/4 of mutable walls randomly raise or lower by WALL_H.
+   * Lowered to 0 → passage (handled in cloneMaze); raised → 2× height.
    */
   function wallHeightFor(x, y) {
-    if (level <= 1) return WALL_H;
-    const riseChance = Math.min(1, (level - 1) * 0.25);
-    if (cellRand(x, y, 1) > riseChance) return WALL_H;
-    // Rising blocks: somewhere between base and double
-    const t = cellRand(x, y, 2);
-    return WALL_H + (WALL_H_MAX - WALL_H) * (0.4 + t * 0.6);
+    if (level <= 1 || !canMutateWall(x, y)) return WALL_H;
+    if (cellRand(x, y, 1) >= 0.25) return WALL_H;
+    return cellRand(x, y, 2) < 0.5 ? WALL_H_MAX : 0;
   }
 
   function buildMazeMeshes() {
@@ -448,7 +462,7 @@ import * as THREE from "three";
         }
 
         if (t === 1) {
-          const h = wallHeightFor(x, y);
+          const h = Math.max(WALL_H, wallHeightFor(x, y));
           const wall = new THREE.Mesh(wallGeoFor(h), wallMat);
           wall.position.set(wx, h / 2, wz);
           wall.castShadow = true;
@@ -1237,6 +1251,16 @@ import * as THREE from "three";
   // ——— Game logic ———
   function cloneMaze() {
     maze = MAZE_TEMPLATE.map((row) => row.split("").map(Number));
+    // Vanished walls (height 0) become open passages with an extra yellow pellet
+    if (level >= 2) {
+      for (let y = 0; y < ROWS; y++) {
+        for (let x = 0; x < COLS; x++) {
+          if (maze[y][x] === 1 && wallHeightFor(x, y) <= 0) {
+            maze[y][x] = 2;
+          }
+        }
+      }
+    }
     pelletCount = 0;
     for (let y = 0; y < ROWS; y++) {
       for (let x = 0; x < COLS; x++) {
@@ -2235,13 +2259,13 @@ import * as THREE from "three";
   }
 
   function startLevel(resetScore = false) {
-    cloneMaze();
     if (resetScore) {
       score = 0;
       lives = 3;
       // Keep progress: restart at saved level even after death
       level = loadSavedLevel();
     }
+    cloneMaze();
     saveLevel();
     modeIndex = 0;
     modeTimer = MODE_SCHEDULE[0].duration;
