@@ -45,6 +45,16 @@
           </div>
           <p class="name-hint">7 letters · ←→ · ↑↓ · type · Enter</p>
         </div>
+        <div id="level-select" class="level-select hidden" aria-label="Level select">
+          <p class="name-label">SELECT LEVEL</p>
+          <div class="level-picker">
+            <button type="button" id="level-minus" class="name-ctrl" aria-label="Previous level">◀</button>
+            <span id="level-pick-val" class="level-pick-val">1</span>
+            <button type="button" id="level-plus" class="name-ctrl" aria-label="Next level">▶</button>
+          </div>
+          <button type="button" id="level-ok" class="name-ctrl name-ok">OK</button>
+          <p class="name-hint">←→ · Enter · Esc</p>
+        </div>
         <ol id="scoreboard" class="scoreboard hidden" aria-label="High scores"></ol>
       </div>
     </main>
@@ -53,10 +63,11 @@
       <div class="jump-wrap">
         <button type="button" id="ar-btn" class="ar-btn" aria-label="Enter AR" hidden>AR</button>
         <button type="button" id="recenter-btn" class="recenter-btn" aria-label="Recenter board" hidden>RECENTER</button>
+        <button type="button" id="level-btn" class="level-btn" aria-label="Select level">LEVEL</button>
         <button type="button" id="jump-btn" class="jump-btn" aria-label="Jump">JUMP ␣</button>
       </div>
       <div id="lives" class="lives" aria-label="Lives remaining"></div>
-      <p class="hint">Frecce + WASD · Space salto · H = high scores · Tono tap/T · AR</p>
+      <p class="hint">Frecce + WASD · Space salto · LEVEL / L · H = scores · Tono tap/T · AR</p>
       <p id="vl-tone" class="vl-tone show" aria-live="polite" role="button" tabindex="0">TONE: FLUTE</p>
     </footer>
   </div>

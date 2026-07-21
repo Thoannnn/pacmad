@@ -90,6 +90,9 @@ import * as THREE from "three";
   const overlayTitle = document.getElementById("overlay-title");
   const overlaySub = document.getElementById("overlay-sub");
   const jumpBtn = document.getElementById("jump-btn");
+  const levelBtn = document.getElementById("level-btn");
+  const levelSelectEl = document.getElementById("level-select");
+  const levelPickValEl = document.getElementById("level-pick-val");
   const nameEntryEl = document.getElementById("name-entry");
   const nameSlotsEl = document.getElementById("name-slots");
   const scoreboardEl = document.getElementById("scoreboard");
@@ -104,6 +107,7 @@ import * as THREE from "three";
   const NAME_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ .";
   const HS_KEY = "pacmad-hiscores";
   const LEVEL_COOKIE = "pacmad-level";
+  const LEVEL_SELECT_MAX = 99;
 
   function loadSavedLevel() {
     try {
@@ -131,6 +135,7 @@ import * as THREE from "three";
   let score = 0;
   let highScore = Number(localStorage.getItem("pacman-high") || 0);
   let hiscores = [];
+  let levelPick = 1;
   let nameChars = Array(NAME_LEN).fill("A");
   let nameCursor = 0;
   let lastEnteredRank = -1;
@@ -2371,6 +2376,7 @@ import * as THREE from "three";
     overlay.classList.add("hidden");
     hideNameEntry();
     hideScoreboard();
+    hideLevelSelect();
   }
 
   function normalizeHiscores(raw) {
@@ -2506,6 +2512,58 @@ import * as THREE from "three";
 
   function hideScoreboard() {
     if (scoreboardEl) scoreboardEl.classList.add("hidden");
+  }
+
+  function renderLevelPick() {
+    if (levelPickValEl) levelPickValEl.textContent = String(levelPick);
+  }
+
+  function showLevelSelect() {
+    if (levelSelectEl) levelSelectEl.classList.remove("hidden");
+    hideNameEntry();
+    hideScoreboard();
+    renderLevelPick();
+  }
+
+  function hideLevelSelect() {
+    if (levelSelectEl) levelSelectEl.classList.add("hidden");
+  }
+
+  function openLevelSelect() {
+    if (state === "entername" || state === "dying") return;
+    ensureAudio();
+    if (state === "playing") {
+      state = "paused";
+      showOverlay("PAUSED", "Select a level or resume", "ready");
+      setMusicMood("ready");
+    }
+    if (state === "won") clearWinFx();
+    levelPick = Math.max(1, Math.min(LEVEL_SELECT_MAX, level));
+    state = "levelselect";
+    showOverlay("LEVEL SELECT", "◀ ▶ then OK · Esc cancel", "ready");
+    showLevelSelect();
+    beep(520, 0.06, "square", 0.025);
+  }
+
+  function nudgeLevelPick(dir) {
+    levelPick = Math.max(1, Math.min(LEVEL_SELECT_MAX, levelPick + dir));
+    renderLevelPick();
+    beep(400 + levelPick * 4, 0.04, "square", 0.02);
+  }
+
+  function confirmLevelSelect() {
+    level = levelPick;
+    saveLevel();
+    hideLevelSelect();
+    startLevel(true);
+    beep(660, 0.08, "triangle", 0.03);
+  }
+
+  function cancelLevelSelect() {
+    hideLevelSelect();
+    state = "ready";
+    showOverlay("READY!", `LEVEL ${level} — Enter / Tap to Start · H = scores`, "ready");
+    setMusicMood("ready");
   }
 
   function beginNameEntry() {
@@ -2677,9 +2735,10 @@ import * as THREE from "three";
     initActors3D();
     refreshPelletVisibility();
     state = "ready";
-    showOverlay("READY!", `LEVEL ${level} — Enter / Tap to Start · H = scores`, "ready");
+    showOverlay("READY!", `LEVEL ${level} — Enter / Tap to Start · L = level`, "ready");
     hideNameEntry();
     hideScoreboard();
+    hideLevelSelect();
     setMusicMood("ready");
     updateHud();
 
@@ -3065,7 +3124,7 @@ import * as THREE from "three";
   function loop(ts, frame) {
     const dt = Math.min((ts - lastTs) / 1000, 0.05);
     lastTs = ts || performance.now();
-    if (state === "ready" || state === "paused" || state === "won" || state === "gameover" || state === "entername") {
+    if (state === "ready" || state === "paused" || state === "won" || state === "gameover" || state === "entername" || state === "levelselect") {
       flashTimer += dt;
       if (state === "entername") renderNameSlots();
     }
@@ -3101,6 +3160,10 @@ import * as THREE from "three";
       confirmNameEntry();
       return;
     }
+    if (state === "levelselect") {
+      confirmLevelSelect();
+      return;
+    }
     if (state === "ready") beginPlay();
     else if (state === "gameover") startLevel(true);
     else if (state === "won") {
@@ -3116,6 +3179,39 @@ import * as THREE from "three";
       ensureAudio();
       if (state === "entername") {
         handleNameEntryKey(e);
+        return;
+      }
+      if (state === "levelselect") {
+        if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A" || e.code === "KeyA") {
+          e.preventDefault();
+          nudgeLevelPick(-1);
+          return;
+        }
+        if (e.key === "ArrowRight" || e.key === "d" || e.key === "D" || e.code === "KeyD") {
+          e.preventDefault();
+          nudgeLevelPick(1);
+          return;
+        }
+        if (e.key === "ArrowUp" || e.key === "w" || e.key === "W") {
+          e.preventDefault();
+          nudgeLevelPick(1);
+          return;
+        }
+        if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") {
+          e.preventDefault();
+          nudgeLevelPick(-1);
+          return;
+        }
+        if (e.key === "Enter") {
+          e.preventDefault();
+          confirmLevelSelect();
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          cancelLevelSelect();
+          return;
+        }
         return;
       }
       const dir = dirFromKey(e.key, e.code);
@@ -3149,6 +3245,9 @@ import * as THREE from "three";
         e.preventDefault();
         if (e.repeat) return;
         cycleVlTone(1);
+      } else if (e.key === "l" || e.key === "L") {
+        e.preventDefault();
+        openLevelSelect();
       } else if (e.key === "h" || e.key === "H") {
         e.preventDefault();
         if (state === "ready" || state === "gameover") {
@@ -3179,7 +3278,7 @@ import * as THREE from "three";
       const t = e.changedTouches[0];
       touchStart = { x: t.clientX, y: t.clientY, t: performance.now() };
       if (state === "ready" || state === "gameover" || state === "won") onStartAction();
-      // ignore during entername — use name controls
+      // ignore during entername / levelselect — use dedicated controls
     },
     { passive: true }
   );
@@ -3235,11 +3334,11 @@ import * as THREE from "three";
   );
 
   overlay.addEventListener("click", (e) => {
-    if (state === "entername") return;
+    if (state === "entername" || state === "levelselect") return;
     onStartAction();
   });
   stage.addEventListener("click", () => {
-    if (state === "entername") return;
+    if (state === "entername" || state === "levelselect") return;
     if (state === "ready" || state === "gameover" || state === "won") onStartAction();
   });
 
@@ -3250,6 +3349,21 @@ import * as THREE from "three";
       tryJump();
     });
   }
+
+  if (levelBtn) {
+    levelBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openLevelSelect();
+    });
+  }
+
+  const levelMinus = document.getElementById("level-minus");
+  const levelPlus = document.getElementById("level-plus");
+  const levelOk = document.getElementById("level-ok");
+  if (levelMinus) levelMinus.addEventListener("click", (e) => { e.stopPropagation(); if (state === "levelselect") nudgeLevelPick(-1); });
+  if (levelPlus) levelPlus.addEventListener("click", (e) => { e.stopPropagation(); if (state === "levelselect") nudgeLevelPick(1); });
+  if (levelOk) levelOk.addEventListener("click", (e) => { e.stopPropagation(); if (state === "levelselect") confirmLevelSelect(); });
 
   const namePrev = document.getElementById("name-prev");
   const nameNext = document.getElementById("name-next");
