@@ -239,7 +239,9 @@ import * as THREE from "three";
   let tripShuffleTimer = 0;
   let tripActive = false;
   let arActive = false;
-  const AR_SCALE = 0.042; // ~1.2m wide maze on a table / floor
+  const AR_SCALE = 0.028; // ~0.8m wide — fits a coffee table
+  const CAM_NEAR_DEFAULT = 0.1;
+  const CAM_NEAR_AR = 0.01;
   const boardHome = { pos: new THREE.Vector3(), scale: new THREE.Vector3(1, 1, 1) };
 
   function randomHueColor(s = 0.75, l = 0.45) {
@@ -784,40 +786,108 @@ import * as THREE from "three";
   let hitTestSource = null;
   let hitTestSourceRequested = false;
   let arPlaced = false;
+  let arPlaceMode = true; // look at table + trigger to place / move
+  const _arPos = new THREE.Vector3();
+  const _arQuat = new THREE.Quaternion();
+  const _arScl = new THREE.Vector3();
+  const _arMat = new THREE.Matrix4();
+  const _arFwd = new THREE.Vector3();
+
   const reticle = new THREE.Mesh(
-    new THREE.RingGeometry(0.08, 0.1, 32).rotateX(-Math.PI / 2),
-    new THREE.MeshBasicMaterial({ color: 0xffd700 })
+    new THREE.RingGeometry(0.06, 0.08, 32).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0xffd700, transparent: true, opacity: 0.9 })
   );
   reticle.matrixAutoUpdate = false;
   reticle.visible = false;
   scene.add(reticle);
 
+  function setArCameraClip() {
+    camera.near = CAM_NEAR_AR;
+    camera.far = 40;
+    camera.updateProjectionMatrix();
+  }
+
+  function restoreCameraClip() {
+    camera.near = CAM_NEAR_DEFAULT;
+    camera.far = 200;
+    camera.updateProjectionMatrix();
+  }
+
+  /** Flat on table: keep world-up, only yaw from surface hit. */
+  function applyBoardOnSurface(matrix, preview) {
+    _arMat.copy(matrix);
+    _arMat.decompose(_arPos, _arQuat, _arScl);
+    board.position.copy(_arPos);
+    board.position.y += 0.002; // sit on table, avoid z-fight
+    // Flatten — horizontal tabletop (ignore surface tilt wobble)
+    board.rotation.set(0, 0, 0);
+    board.quaternion.identity();
+    board.scale.setScalar(AR_SCALE);
+    board.visible = true;
+    if (!preview) {
+      arPlaced = true;
+      arPlaceMode = false;
+      reticle.visible = false;
+    }
+  }
+
+  function placeBoardInFrontOfViewer(frame) {
+    const refSpace = renderer.xr.getReferenceSpace();
+    if (!refSpace || !frame) return false;
+    const viewer = frame.getViewerPose(refSpace);
+    if (!viewer) return false;
+    _arMat.fromArray(viewer.transform.matrix);
+    _arMat.decompose(_arPos, _arQuat, _arScl);
+    _arFwd.set(0, 0, -1).applyQuaternion(_arQuat);
+    _arFwd.y = 0;
+    if (_arFwd.lengthSq() < 1e-6) _arFwd.set(0, 0, -1);
+    _arFwd.normalize();
+    // ~55cm ahead, ~40cm below eye ≈ table height
+    board.position.copy(_arPos).addScaledVector(_arFwd, 0.55);
+    board.position.y = _arPos.y - 0.42;
+    board.rotation.set(0, Math.atan2(_arFwd.x, _arFwd.z), 0);
+    board.scale.setScalar(AR_SCALE);
+    board.visible = true;
+    arPlaced = true;
+    arPlaceMode = false;
+    reticle.visible = false;
+    return true;
+  }
+
   function enterArLayout() {
     arActive = true;
+    arPlaced = false;
+    arPlaceMode = true;
     boardHome.pos.copy(board.position);
     boardHome.scale.copy(board.scale);
+    boardHome.quat = board.quaternion.clone();
     scene.background = null;
     scene.fog = null;
-    // Table-scale maze floating in front of the player (Quest / floor ref)
+    setArCameraClip();
     board.scale.setScalar(AR_SCALE);
-    if (!arPlaced) {
-      board.position.set(0, 0.02, -0.95);
-    }
+    board.visible = false; // wait until surface placement
     document.body.classList.add("ar-mode");
     if (arBtn) {
       arBtn.classList.add("active");
       arBtn.textContent = "EXIT AR";
+    }
+    if (overlaySub) {
+      overlaySub.textContent = "Look at table · Trigger to place · Squeeze = jump";
     }
   }
 
   function exitArLayout() {
     arActive = false;
     arPlaced = false;
+    arPlaceMode = false;
     hitTestSource = null;
     hitTestSourceRequested = false;
     reticle.visible = false;
+    board.visible = true;
     board.position.copy(boardHome.pos);
     board.scale.copy(boardHome.scale);
+    board.quaternion.identity();
+    restoreCameraClip();
     if (!tripActive) {
       scene.background = new THREE.Color(bgBackup);
       scene.fog = new THREE.FogExp2(fogBackup.color.getHex(), fogBackup.density);
@@ -830,20 +900,6 @@ import * as THREE from "three";
       arBtn.textContent = "AR";
     }
     resize();
-  }
-
-  function placeBoardAtMatrix(matrix) {
-    const pos = new THREE.Vector3();
-    const quat = new THREE.Quaternion();
-    const scl = new THREE.Vector3();
-    matrix.decompose(pos, quat, scl);
-    board.position.copy(pos);
-    board.quaternion.copy(quat);
-    board.scale.setScalar(AR_SCALE);
-    // Lift slightly so floor meshes don't z-fight
-    board.position.y += 0.01;
-    arPlaced = true;
-    reticle.visible = false;
   }
 
   async function startArSession() {
@@ -862,12 +918,6 @@ import * as THREE from "three";
       }
       await renderer.xr.setSession(session);
       enterArLayout();
-      // On Quest / floor-less local space, drop maze to roughly table height
-      if (!isQuest) {
-        board.position.set(0, 0.02, -0.85);
-      } else {
-        board.position.set(0, 0.05, -1.1);
-      }
       session.addEventListener("end", () => {
         xrSession = null;
         exitArLayout();
@@ -876,7 +926,15 @@ import * as THREE from "three";
 
     try {
       const sessionInit = {
-        optionalFeatures: ["local-floor", "bounded-floor", "hit-test", "layers"],
+        // hit-test + planes = place on real table (Quest 3 / phones)
+        optionalFeatures: [
+          "local-floor",
+          "bounded-floor",
+          "hit-test",
+          "plane-detection",
+          "anchors",
+          "layers",
+        ],
       };
       if (!isQuest) {
         sessionInit.optionalFeatures.push("dom-overlay");
@@ -886,12 +944,11 @@ import * as THREE from "three";
     } catch (err) {
       console.warn("AR session failed, retrying minimal", err);
       try {
-        await trySession({ optionalFeatures: ["local-floor", "hit-test"] });
+        await trySession({ optionalFeatures: ["local-floor", "hit-test", "plane-detection"] });
       } catch (err2) {
         console.warn("AR fallback failed", err2);
         if (arBtn) {
-          arBtn.textContent = "AR N/A";
-          arBtn.disabled = true;
+          arBtn.hidden = true;
         }
       }
     }
@@ -925,7 +982,7 @@ import * as THREE from "three";
         }
         arBtn.hidden = false;
         arBtn.disabled = false;
-        arBtn.title = "WebXR AR — Meta Quest passthrough / mobile AR";
+        arBtn.title = "WebXR AR — place maze on your table (Quest / mobile)";
         arBtn.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -935,18 +992,20 @@ import * as THREE from "three";
       .catch(showUnsupported);
   }
 
-  // Quest controllers: trigger/select = jump or start; squeeze = jump
   function onXrSelect() {
     ensureAudio();
-    if (state === "ready" || state === "gameover" || state === "won") onStartAction();
-    else if (state === "playing") {
-      if (!arPlaced && reticle.visible) {
-        // Place maze on hit-test reticle (phone AR)
-        placeBoardAtMatrix(reticle.matrix);
-      } else {
-        tryJump();
-      }
+    // Place / move board onto surface under reticle
+    if (arActive && reticle.visible) {
+      applyBoardOnSurface(reticle.matrix, false);
+      if (state === "ready") onStartAction();
+      return;
     }
+    if (state === "ready" || state === "gameover" || state === "won") onStartAction();
+    else if (state === "playing") tryJump();
+  }
+
+  function onXrSqueeze() {
+    if (state === "playing") tryJump();
   }
 
   {
@@ -954,26 +1013,35 @@ import * as THREE from "three";
     const c1 = renderer.xr.getController(1);
     c0.addEventListener("select", onXrSelect);
     c1.addEventListener("select", onXrSelect);
-    c0.addEventListener("squeeze", () => tryJump());
-    c1.addEventListener("squeeze", () => tryJump());
+    c0.addEventListener("squeeze", onXrSqueeze);
+    c1.addEventListener("squeeze", onXrSqueeze);
     scene.add(c0);
     scene.add(c1);
   }
 
+  let arFallbackAt = 0;
+
   function updateArHitTest(frame) {
-    if (!frame || !arActive || arPlaced) return;
+    if (!frame || !arActive) return;
     const session = renderer.xr.getSession();
     if (!session) return;
 
+    // Keep near clip aggressive (lets you lean in close to the maze)
+    if (camera.near > CAM_NEAR_AR + 0.001) setArCameraClip();
+
     if (!hitTestSourceRequested) {
       hitTestSourceRequested = true;
+      arFallbackAt = performance.now();
       session.requestReferenceSpace("viewer").then((refSpace) => {
-        session.requestHitTestSource?.({ space: refSpace }).then((source) => {
-          hitTestSource = source;
-        }).catch(() => {
-          // No hit-test (Quest often) — keep fixed placement
-          hitTestSource = null;
-        });
+        const req = session.requestHitTestSource?.bind(session);
+        if (!req) return;
+        req({ space: refSpace })
+          .then((source) => {
+            hitTestSource = source;
+          })
+          .catch(() => {
+            hitTestSource = null;
+          });
       });
       session.addEventListener("end", () => {
         hitTestSourceRequested = false;
@@ -981,18 +1049,33 @@ import * as THREE from "three";
       });
     }
 
-    if (!hitTestSource) return;
-    const hitTestResults = frame.getHitTestResults(hitTestSource);
-    if (hitTestResults.length) {
-      const hit = hitTestResults[0];
-      const refSpace = renderer.xr.getReferenceSpace();
-      const pose = hit.getPose(refSpace);
-      if (pose) {
-        reticle.visible = true;
-        reticle.matrix.fromArray(pose.transform.matrix);
+    let gotHit = false;
+    if (hitTestSource) {
+      const hitTestResults = frame.getHitTestResults(hitTestSource);
+      if (hitTestResults.length) {
+        const hit = hitTestResults[0];
+        const refSpace = renderer.xr.getReferenceSpace();
+        const pose = hit.getPose(refSpace);
+        if (pose) {
+          reticle.visible = true;
+          reticle.matrix.fromArray(pose.transform.matrix);
+          gotHit = true;
+          // Preview follow until confirmed with trigger
+          if (!arPlaced) {
+            applyBoardOnSurface(reticle.matrix, true);
+            board.visible = true;
+          }
+        }
       }
-    } else {
+    }
+
+    if (!gotHit) {
       reticle.visible = false;
+      // No surface yet: after 2.5s place a table-height board in front
+      if (!arPlaced && performance.now() - arFallbackAt > 2500) {
+        placeBoardInFrontOfViewer(frame);
+        arFallbackAt = performance.now() + 1e9;
+      }
     }
   }
 
