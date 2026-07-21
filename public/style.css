@@ -215,6 +215,21 @@ body {
   text-shadow: 0 1px 0 #000;
 }
 
+.vl-tone {
+  margin: 0;
+  font-size: 0.42rem;
+  letter-spacing: 0.12em;
+  color: #7ec8ff;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  text-shadow: 0 1px 0 #000;
+  pointer-events: none;
+}
+
+.vl-tone.show {
+  opacity: 1;
+}
+
 @keyframes pulse {
   0%,
   100% {

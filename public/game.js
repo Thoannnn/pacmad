@@ -100,6 +100,7 @@ import * as THREE from "three";
   let level = 1;
   let state = "ready";
   let frightenedTimer = 0;
+  let frightenedMax = 14;
   let frightenedPoints = 200;
   let modeIndex = 0;
   let modeTimer = 0;
@@ -110,6 +111,15 @@ import * as THREE from "three";
   let mouthPhase = 0;
   let lastTs = 0;
   let audioCtx = null;
+  let musicMaster = null;
+  let rhythmGain = null;
+  let musicMood = "ready";
+  let musicStep = 0;
+  let musicAcc = 0;
+  let musicOneShot = null;
+  let vlToneIndex = 1; // Fantasy — classic VL vibe
+  let vlPulseCache = new Map();
+  let toneFlashTimer = 0;
   let jumpTimer = 0; // >0 while airborne
 
   const input = { queue: null, held: null };
@@ -204,10 +214,95 @@ import * as THREE from "three";
     opacity: 0.85,
   });
 
+  const sceneColorTargets = [
+    wallMat,
+    wallTopMat,
+    floorMat,
+    floorAltMat,
+    pelletMat,
+    powerMat,
+    gateMat,
+  ];
+  const sceneColorBackup = sceneColorTargets.map((m) => ({
+    color: m.color.clone(),
+    emissive: m.emissive ? m.emissive.clone() : null,
+    emissiveIntensity: m.emissiveIntensity,
+  }));
+  const bgBackup = scene.background.clone();
+  const fogBackup = scene.fog.color.clone();
+  let tripShuffleTimer = 0;
+  let tripActive = false;
+
+  function randomHueColor(s = 0.75, l = 0.45) {
+    return new THREE.Color().setHSL(Math.random(), s, l);
+  }
+
+  function applyTripColors() {
+    tripActive = true;
+    sceneColorTargets.forEach((m) => {
+      m.color.copy(randomHueColor(0.85, 0.4 + Math.random() * 0.25));
+      if (m.emissive) {
+        m.emissive.copy(randomHueColor(0.9, 0.25));
+        m.emissiveIntensity = 0.4 + Math.random() * 0.9;
+      }
+    });
+    scene.background.copy(randomHueColor(0.7, 0.08));
+    scene.fog.color.copy(scene.background);
+    hemi.color.copy(randomHueColor(0.6, 0.55));
+    hemi.groundColor.copy(randomHueColor(0.5, 0.2));
+    sun.color.copy(randomHueColor(0.4, 0.85));
+    if (pacMesh?.userData?.bodyMat) {
+      pacMesh.userData.bodyMat.color.copy(randomHueColor(0.9, 0.55));
+      pacMesh.userData.bodyMat.emissive.copy(randomHueColor(0.8, 0.3));
+    }
+    ghostMeshes.forEach((mesh) => {
+      const body = mesh.userData.body;
+      if (!body) return;
+      body.material.color.copy(randomHueColor(0.9, 0.5));
+      body.material.emissive.copy(randomHueColor(0.7, 0.25));
+    });
+  }
+
+  function restoreSceneColors() {
+    tripActive = false;
+    tripShuffleTimer = 0;
+    sceneColorTargets.forEach((m, i) => {
+      const b = sceneColorBackup[i];
+      m.color.copy(b.color);
+      if (m.emissive && b.emissive) {
+        m.emissive.copy(b.emissive);
+        m.emissiveIntensity = b.emissiveIntensity;
+      }
+    });
+    scene.background.copy(bgBackup);
+    scene.fog.color.copy(fogBackup);
+    hemi.color.set(0x8899ff);
+    hemi.groundColor.set(0x111122);
+    sun.color.set(0xffffff);
+    if (pacMesh?.userData?.bodyMat) {
+      pacMesh.userData.bodyMat.color.set(0xffd700);
+      pacMesh.userData.bodyMat.emissive.set(0xaa7700);
+      pacMesh.userData.bodyMat.emissiveIntensity = 0.35;
+    }
+    ghostMeshes.forEach((mesh, i) => {
+      const body = mesh.userData.body;
+      if (!body) return;
+      const base = mesh.userData.baseColor ?? ghosts[i]?.color ?? 0xff0000;
+      body.material.color.set(base);
+      body.material.emissive.set(new THREE.Color(base).multiplyScalar(0.15));
+    });
+  }
+
   const pelletMeshes = new Map(); // "x,y" -> mesh
   let mazeRoot = null;
   let pacMesh = null;
   let pacMouth = null;
+  let pacLimbs = null;
+  let pacEyes = null;
+  let pacBody = null;
+  let pacUpper = null;
+  let pacLower = null;
+  let lastMouthGap = -1;
   const ghostMeshes = [];
 
   const camTarget = new THREE.Vector3(COLS / 2, 0, ROWS / 2);
@@ -323,31 +418,159 @@ import * as THREE from "three";
 
   function makePacmanMesh() {
     const g = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.SphereGeometry(0.38, 24, 18),
-      new THREE.MeshStandardMaterial({
-        color: 0xffd700,
-        emissive: 0xaa7700,
-        emissiveIntensity: 0.35,
-        roughness: 0.4,
-      })
-    );
-    body.castShadow = true;
-    g.add(body);
+    // Local facing: +Z = forward
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xffd700,
+      emissive: 0xaa7700,
+      emissiveIntensity: 0.35,
+      roughness: 0.4,
+    });
+    const limbMat = new THREE.MeshStandardMaterial({
+      color: 0xffc400,
+      emissive: 0x996600,
+      emissiveIntensity: 0.4,
+      roughness: 0.45,
+    });
 
-    // Mouth dark wedge (rotates with facing)
-    const mouth = new THREE.Mesh(
-      new THREE.SphereGeometry(0.39, 16, 12, 0, Math.PI * 2, 0, Math.PI),
-      new THREE.MeshBasicMaterial({ color: 0x000000 })
+    // Classic Pac-Man: upper + lower hemispheres open horizontally (rotate on X)
+    const jawPivot = new THREE.Group();
+    const upper = new THREE.Mesh(
+      new THREE.SphereGeometry(0.36, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2),
+      mat
     );
-    mouth.scale.set(1, 1, 0.55);
-    mouth.rotation.x = Math.PI / 2;
-    mouth.position.set(0.05, 0, 0);
-    g.add(mouth);
-    pacMouth = mouth;
+    upper.castShadow = true;
+    const lower = new THREE.Mesh(
+      new THREE.SphereGeometry(0.36, 32, 16, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
+      mat
+    );
+    lower.castShadow = true;
+    jawPivot.add(upper);
+    jawPivot.add(lower);
 
-    g.position.y = 0.38;
+    // Dark throat so limbs aren't visible through the open mouth
+    const throat = new THREE.Mesh(
+      new THREE.CircleGeometry(0.34, 28),
+      new THREE.MeshBasicMaterial({ color: 0x1a0800, side: THREE.DoubleSide })
+    );
+    throat.position.z = -0.02;
+    jawPivot.add(throat);
+
+    g.add(jawPivot);
+    pacUpper = upper;
+    pacLower = lower;
+    pacBody = jawPivot;
+    g.userData.bodyMat = mat;
+
+    // Big eyes on the upper half — pupils track nearest ghost
+    const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+    const eyePupilMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+    pacEyes = [];
+    [-1, 1].forEach((side) => {
+      const white = new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 12), eyeWhiteMat);
+      white.position.set(side * 0.15, 0.2, 0.2);
+      white.castShadow = true;
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.065, 12, 10), eyePupilMat);
+      pupil.position.set(0, 0, 0.08);
+      white.add(pupil);
+      upper.add(white);
+      pacEyes.push({ white, pupil, side });
+    });
+
+    pacMouth = jawPivot;
+
+    // Arms — outside body on ±X
+    function makeArm(side) {
+      const pivot = new THREE.Group();
+      pivot.position.set(side * 0.34, 0.02, -0.02);
+      const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.16, 4, 8), limbMat);
+      arm.rotation.z = side > 0 ? -Math.PI / 2 : Math.PI / 2;
+      arm.position.x = side * 0.14;
+      arm.castShadow = true;
+      pivot.add(arm);
+      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), limbMat);
+      hand.position.set(side * 0.28, 0, 0.02);
+      hand.castShadow = true;
+      pivot.add(hand);
+      g.add(pivot);
+      return pivot;
+    }
+
+    // Legs sit behind the body so they never show through the mouth
+    function makeLeg(side) {
+      const pivot = new THREE.Group();
+      pivot.position.set(side * 0.11, -0.3, -0.14);
+      const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.14, 4, 8), limbMat);
+      thigh.position.y = -0.12;
+      thigh.castShadow = true;
+      pivot.add(thigh);
+      const foot = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), limbMat);
+      foot.position.set(0, -0.26, 0.02);
+      foot.castShadow = true;
+      pivot.add(foot);
+      g.add(pivot);
+      return pivot;
+    }
+
+    pacLimbs = {
+      leftArm: makeArm(-1),
+      rightArm: makeArm(1),
+      leftLeg: makeLeg(-1),
+      rightLeg: makeLeg(1),
+    };
+    g.userData.limbs = pacLimbs;
+    g.userData.eyes = pacEyes;
+    g.position.y = 0.42;
+    lastMouthGap = -1;
     return g;
+  }
+
+  function setPacMouthOpen(halfGap) {
+    if (!pacUpper || !pacLower) return;
+    const gap = THREE.MathUtils.clamp(halfGap, 0.08, 0.85);
+    if (Math.abs(gap - lastMouthGap) < 0.02) return;
+    lastMouthGap = gap;
+    // Horizontal bite: jaws hinge on X so the opening faces +Z
+    pacUpper.rotation.x = -gap;
+    pacLower.rotation.x = gap;
+  }
+
+  function nearestGhost() {
+    let best = null;
+    let bestD = Infinity;
+    for (const g of ghosts) {
+      if (g.eaten) continue;
+      const d = Math.hypot(g.x - pacman.x, g.y - pacman.y);
+      if (d < bestD) {
+        bestD = d;
+        best = g;
+      }
+    }
+    return best;
+  }
+
+  function updatePacEyesLook() {
+    const eyes = pacEyes || pacMesh?.userData?.eyes;
+    if (!eyes || !pacMesh) return;
+    const target = nearestGhost();
+    let lookX = 0;
+    let lookY = 0;
+    let lookZ = 1;
+    if (target) {
+      const dx = worldX(target.x) - pacMesh.position.x;
+      const dy = 0.4 - pacMesh.position.y;
+      const dz = worldZ(target.y) - pacMesh.position.z;
+      const yaw = pacMesh.rotation.y;
+      // world → local (inverse of rotation.y)
+      const lx = dx * Math.cos(yaw) + dz * Math.sin(yaw);
+      const lz = -dx * Math.sin(yaw) + dz * Math.cos(yaw);
+      const len = Math.hypot(lx, dy, lz) || 1;
+      lookX = THREE.MathUtils.clamp(lx / len, -1, 1);
+      lookY = THREE.MathUtils.clamp(dy / len, -1, 1);
+      lookZ = THREE.MathUtils.clamp(lz / len, -1, 1);
+    }
+    eyes.forEach((e) => {
+      e.pupil.position.set(lookX * 0.05, lookY * 0.05, 0.08 + Math.max(0, lookZ) * 0.02);
+    });
   }
 
   function makeGhostMesh(color) {
@@ -403,7 +626,7 @@ import * as THREE from "three";
 
     pacMesh.position.x = worldX(pacman.x);
     pacMesh.position.z = worldZ(pacman.y);
-    const baseY = 0.38;
+    const baseY = 0.42;
     if (state === "dying") {
       pacMesh.position.y = baseY * Math.max(0, dyingTimer / 1.4);
     } else {
@@ -418,19 +641,46 @@ import * as THREE from "three";
     }
 
     const yaw = {
-      right: Math.PI / 2,
-      left: -Math.PI / 2,
-      up: Math.PI,
+      // Mesh forward is +Z; world: right=+X, left=-X, down=+Z, up=-Z
       down: 0,
+      right: Math.PI / 2,
+      up: Math.PI,
+      left: -Math.PI / 2,
       none: 0,
     }[pacman.dir.name];
     pacMesh.rotation.y = yaw;
 
-    if (pacMouth) {
-      const open = 0.25 + Math.abs(Math.sin(mouthPhase)) * 0.45;
-      pacMouth.scale.z = 0.25 + open;
-      pacMouth.visible = state !== "dying";
+    // Mouth opens forward (+Z wedge), not downward
+    if (state !== "dying") {
+      const halfGap = 0.22 + Math.abs(Math.sin(mouthPhase)) * 0.55;
+      setPacMouthOpen(halfGap);
+    } else {
+      setPacMouthOpen(0.95);
     }
+    updatePacEyesLook();
+
+    // Animate mini arms & legs (swing around X = forward plane)
+    const limbs = pacLimbs || pacMesh.userData.limbs;
+    if (limbs) {
+      const swing = state === "playing" && jumpTimer <= 0 ? Math.sin(mouthPhase * 1.8) * 0.7 : 0;
+      const jump = jumpTimer > 0 ? jumpHeight() / JUMP_HEIGHT : 0;
+      // Arms flap forward/back + raise on jump
+      limbs.leftArm.rotation.y = swing * 0.5;
+      limbs.rightArm.rotation.y = -swing * 0.5;
+      limbs.leftArm.rotation.z = 0.25 + jump * 1.1;
+      limbs.rightArm.rotation.z = -0.25 - jump * 1.1;
+      limbs.leftArm.rotation.x = -jump * 0.4;
+      limbs.rightArm.rotation.x = -jump * 0.4;
+      limbs.leftLeg.rotation.x = -swing * 0.9 + jump * 0.7;
+      limbs.rightLeg.rotation.x = swing * 0.9 + jump * 0.7;
+      if (state === "dying") {
+        limbs.leftArm.rotation.set(-0.2, 0, 0.9);
+        limbs.rightArm.rotation.set(-0.2, 0, -0.9);
+        limbs.leftLeg.rotation.set(0.3, 0, 0);
+        limbs.rightLeg.rotation.set(0.3, 0, 0);
+      }
+    }
+
     pacMesh.visible = true;
 
     ghosts.forEach((g, i) => {
@@ -441,10 +691,10 @@ import * as THREE from "three";
       mesh.position.y = 0.35 + Math.sin(flashTimer * 6 + i) * 0.03;
 
       const gyaw = {
-        right: Math.PI / 2,
-        left: -Math.PI / 2,
-        up: Math.PI,
         down: 0,
+        right: Math.PI / 2,
+        up: Math.PI,
+        left: -Math.PI / 2,
         none: 0,
       }[g.dir.name];
       mesh.rotation.y = gyaw;
@@ -459,12 +709,17 @@ import * as THREE from "three";
         });
       } else {
         body.visible = true;
-        if (g.mode === "frightened") {
-          body.material.color.set(flashing ? 0xffffff : 0x2121de);
-          body.material.emissive.set(flashing ? 0x444444 : 0x111166);
-        } else {
-          body.material.color.set(mesh.userData.baseColor);
-          body.material.emissive.set(new THREE.Color(mesh.userData.baseColor).multiplyScalar(0.15));
+        // During trip mode, colors come from applyTripColors — don't overwrite
+        if (!tripActive) {
+          if (g.mode === "frightened") {
+            body.material.color.set(flashing ? 0xffffff : 0x2121de);
+            body.material.emissive.set(flashing ? 0x444444 : 0x111166);
+          } else {
+            body.material.color.set(mesh.userData.baseColor);
+            body.material.emissive.set(new THREE.Color(mesh.userData.baseColor).multiplyScalar(0.15));
+          }
+        } else if (g.mode === "frightened" && flashing) {
+          body.material.color.set(0xffffff);
         }
       }
 
@@ -585,6 +840,14 @@ import * as THREE from "three";
       if (AC) audioCtx = new AC();
     }
     if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+    if (audioCtx && !musicMaster) {
+      musicMaster = audioCtx.createGain();
+      musicMaster.gain.value = 0.055;
+      musicMaster.connect(audioCtx.destination);
+      rhythmGain = audioCtx.createGain();
+      rhythmGain.gain.value = 0.038;
+      rhythmGain.connect(audioCtx.destination);
+    }
   }
 
   function beep(freq, duration = 0.08, type = "square", gain = 0.03) {
@@ -605,6 +868,325 @@ import * as THREE from "three";
     }
   }
 
+  // --- Casio VL-Tone / VL-10 style engine ---
+  // Voices inspired by VL-1/VL-10 multipulse square + linear envelopes + Po/Pi/Sha
+  const N = {
+    C3: 130.81, D3: 146.83, E3: 164.81, F3: 174.61, G3: 196.0, A3: 220.0, B3: 246.94,
+    C4: 261.63, D4: 293.66, E4: 329.63, F4: 349.23, G4: 392.0, A4: 440.0, B4: 493.88,
+    C5: 523.25, D5: 587.33, E5: 659.25, F5: 698.46, G5: 783.99, A5: 880.0, C6: 1046.5,
+  };
+
+  const VL_TONES = [
+    // duty ≈ pulse width; octaveBoost like Fantasy (2·f on VL-1)
+    { id: "piano", label: "PIANO", duty: 0.7, attack: 0.01, decay: 0.12, sustain: 0.25, release: 0.18, vibHz: 5.5, vibDepth: 4, octave: 1 },
+    { id: "fantasy", label: "FANTASY", duty: 0.5, attack: 0.02, decay: 0.08, sustain: 0.55, release: 0.35, vibHz: 6.5, vibDepth: 9, octave: 2 },
+    { id: "violin", label: "VIOLIN", duty: 0.22, attack: 0.08, decay: 0.15, sustain: 0.7, release: 0.28, vibHz: 6.0, vibDepth: 7, octave: 1, pulses: 5 },
+    { id: "flute", label: "FLUTE", duty: 0.5, attack: 0.05, decay: 0.1, sustain: 0.65, release: 0.22, vibHz: 5.0, vibDepth: 3, octave: 1 },
+    { id: "guitar", label: "GUITAR", duty: 0.35, attack: 0.005, decay: 0.09, sustain: 0.12, release: 0.12, vibHz: 0, vibDepth: 0, octave: 0.5 },
+    { id: "horn", label: "ENG HORN", duty: 0.12, attack: 0.04, decay: 0.12, sustain: 0.5, release: 0.2, vibHz: 4.5, vibDepth: 5, octave: 0.5 },
+    { id: "electro1", label: "ELECTRO I", duty: 0.7, attack: 0.01, decay: 0.06, sustain: 0.4, release: 0.15, vibHz: 8, vibDepth: 28, octave: 1 },
+    { id: "electro2", label: "ELECTRO II", duty: 0.5, attack: 0.01, decay: 0.05, sustain: 0.45, release: 0.18, vibHz: 10, vibDepth: 40, octave: 2 },
+  ];
+
+  function getVlPeriodicWave(duty, pulses = 1) {
+    const key = `${duty.toFixed(3)}_${pulses}`;
+    if (vlPulseCache.has(key)) return vlPulseCache.get(key);
+    const n = 48;
+    const real = new Float32Array(n);
+    const imag = new Float32Array(n);
+    for (let i = 1; i < n; i++) {
+      // Multipulse approximation: sum of offset pulse trains
+      let imagSum = 0;
+      for (let p = 0; p < pulses; p++) {
+        const phase = (p / pulses) * Math.PI;
+        imagSum += Math.sin(i * Math.PI * duty + phase) / i;
+      }
+      imag[i] = (2 / Math.PI) * imagSum;
+    }
+    const wave = audioCtx.createPeriodicWave(real, imag, { disableNormalization: false });
+    vlPulseCache.set(key, wave);
+    return wave;
+  }
+
+  function playVlTone(freq, dur, tone, vol = 0.55, when = 0) {
+    if (!audioCtx || !musicMaster || !freq || !tone) return;
+    try {
+      const t0 = audioCtx.currentTime + when;
+      const osc = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = 2800;
+      filter.Q.value = 0.7;
+
+      const wave = getVlPeriodicWave(tone.duty, tone.pulses || 1);
+      osc.setPeriodicWave(wave);
+      osc.frequency.setValueAtTime(freq * tone.octave, t0);
+
+      if (tone.vibDepth > 0 && tone.vibHz > 0) {
+        const lfo = audioCtx.createOscillator();
+        const lfoGain = audioCtx.createGain();
+        lfo.frequency.value = tone.vibHz;
+        lfoGain.gain.value = tone.vibDepth * tone.octave;
+        lfo.connect(lfoGain);
+        lfoGain.connect(osc.frequency);
+        lfo.start(t0);
+        lfo.stop(t0 + dur + tone.release + 0.05);
+      }
+
+      // VL-style near-linear envelope (fades early — classic Casio quirk)
+      const peak = vol;
+      const a = Math.max(0.004, tone.attack);
+      const d = Math.max(0.01, tone.decay);
+      const s = peak * tone.sustain;
+      const r = Math.max(0.04, tone.release);
+      const noteEnd = t0 + Math.max(dur, a + d * 0.5);
+
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.linearRampToValueAtTime(peak, t0 + a);
+      g.gain.linearRampToValueAtTime(s, t0 + a + d);
+      g.gain.linearRampToValueAtTime(s * 0.85, noteEnd);
+      g.gain.linearRampToValueAtTime(0.0001, noteEnd + r);
+
+      osc.connect(filter);
+      filter.connect(g);
+      g.connect(musicMaster);
+      osc.start(t0);
+      osc.stop(noteEnd + r + 0.03);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  function playVlBass(freq, dur, vol = 0.45, when = 0) {
+    if (!audioCtx || !musicMaster || !freq) return;
+    try {
+      const t0 = audioCtx.currentTime + when;
+      const osc = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      osc.type = "triangle";
+      osc.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.linearRampToValueAtTime(vol, t0 + 0.01);
+      g.gain.linearRampToValueAtTime(0.0001, t0 + dur);
+      osc.connect(g);
+      g.connect(musicMaster);
+      osc.start(t0);
+      osc.stop(t0 + dur + 0.02);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  // Casio rhythm kit: Po (low clave), Pi (high clave), Sha (noise snare)
+  function playPo(when = 0) {
+    if (!audioCtx || !rhythmGain) return;
+    try {
+      const t0 = audioCtx.currentTime + when;
+      const osc = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      osc.type = "square";
+      osc.frequency.value = 769;
+      g.gain.setValueAtTime(0.5, t0);
+      g.gain.linearRampToValueAtTime(0.0001, t0 + 0.03);
+      osc.connect(g);
+      g.connect(rhythmGain);
+      osc.start(t0);
+      osc.stop(t0 + 0.035);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  function playPi(when = 0) {
+    if (!audioCtx || !rhythmGain) return;
+    try {
+      const t0 = audioCtx.currentTime + when;
+      const osc = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      osc.type = "square";
+      osc.frequency.value = 1667;
+      g.gain.setValueAtTime(0.4, t0);
+      g.gain.linearRampToValueAtTime(0.0001, t0 + 0.02);
+      osc.connect(g);
+      g.connect(rhythmGain);
+      osc.start(t0);
+      osc.stop(t0 + 0.025);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  function playSha(when = 0) {
+    if (!audioCtx || !rhythmGain) return;
+    try {
+      const t0 = audioCtx.currentTime + when;
+      const len = 0.16;
+      const buffer = audioCtx.createBuffer(1, Math.ceil(audioCtx.sampleRate * len), audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      let reg = 0xace1;
+      for (let i = 0; i < data.length; i++) {
+        reg ^= reg << 7;
+        reg ^= reg >>> 9;
+        reg ^= reg << 8;
+        data[i] = ((reg & 0xffff) / 0x8000 - 1) * (1 - i / data.length);
+      }
+      const src = audioCtx.createBufferSource();
+      const g = audioCtx.createGain();
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = "bandpass";
+      filter.frequency.value = 2800;
+      filter.Q.value = 0.8;
+      src.buffer = buffer;
+      g.gain.setValueAtTime(0.45, t0);
+      g.gain.linearRampToValueAtTime(0.0001, t0 + len);
+      src.connect(filter);
+      filter.connect(g);
+      g.connect(rhythmGain);
+      src.start(t0);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  // Simple rock-ish VL pattern over 8 eighths: Po _ Pi Sha | Po _ Pi _
+  function playVlRhythmHit(step) {
+    const s = step % 8;
+    if (s === 0) playPo();
+    else if (s === 2) playPi();
+    else if (s === 3) playSha();
+    else if (s === 4) playPo();
+    else if (s === 6) playPi();
+  }
+
+  const MUSIC = {
+    ready: {
+      bpm: 112,
+      lead: [N.G4, 0, N.E4, 0, N.C4, 0, N.E4, 0, N.G4, 0, N.C5, 0, N.B4, 0, N.A4, 0],
+      bass: [N.C3, 0, 0, 0, N.G3, 0, 0, 0, N.A3, 0, 0, 0, N.G3, 0, 0, 0],
+      rhythm: false,
+    },
+    chase: {
+      bpm: 148,
+      lead: [N.C5, N.C5, N.G4, 0, N.E4, N.E4, N.C4, 0, N.F4, N.F4, N.A4, 0, N.G4, N.E4, N.C4, 0],
+      bass: [N.C3, 0, N.C3, 0, N.G3, 0, N.G3, 0, N.F3, 0, N.F3, 0, N.G3, 0, N.E3, 0],
+      rhythm: true,
+    },
+    fright: {
+      bpm: 196,
+      lead: [N.A5, N.E5, N.C5, N.E5, N.A5, N.E5, N.C5, N.E5, N.B4, N.F5, N.D5, N.F5, N.B4, N.F5, N.D5, N.F5],
+      bass: [N.A3, N.A3, N.E3, N.E3, N.A3, N.A3, N.E3, N.E3, N.B3, N.B3, N.F3, N.F3, N.B3, N.B3, N.F3, N.F3],
+      rhythm: true,
+    },
+    paused: {
+      bpm: 80,
+      lead: [N.E4, 0, 0, 0, N.G4, 0, 0, 0],
+      bass: [N.C3, 0, 0, 0, N.G3, 0, 0, 0],
+      rhythm: false,
+    },
+    death: {
+      bpm: 100,
+      oneshot: true,
+      lead: [N.E5, N.D5, N.C5, N.B4, N.A4, N.G4, N.F4, N.E4, N.D4, N.C4, 0, 0],
+      bass: [N.E3, 0, N.D3, 0, N.C3, 0, N.B3, 0, N.A3, 0, N.G3, 0],
+      rhythm: false,
+    },
+    win: {
+      bpm: 150,
+      oneshot: true,
+      lead: [N.C4, N.E4, N.G4, N.C5, N.E5, N.G5, N.E5, N.C5, N.G5, N.C5, 0, 0],
+      bass: [N.C3, 0, N.E3, 0, N.G3, 0, N.C4, 0, N.G3, 0, N.C3, 0],
+      rhythm: false,
+    },
+    gameover: {
+      bpm: 90,
+      oneshot: true,
+      lead: [N.G4, N.F4, N.E4, N.D4, N.C4, N.B3, N.A3, N.G3, 0, 0, 0, 0],
+      bass: [N.G3, 0, N.F3, 0, N.E3, 0, N.D3, 0, N.C3, 0, 0, 0],
+      rhythm: false,
+    },
+  };
+
+  function currentVlTone() {
+    return VL_TONES[vlToneIndex % VL_TONES.length];
+  }
+
+  function cycleVlTone(dir = 1) {
+    ensureAudio();
+    vlToneIndex = (vlToneIndex + dir + VL_TONES.length) % VL_TONES.length;
+    toneFlashTimer = 2.2;
+    updateToneHud();
+    // Preview the new voice
+    const tone = currentVlTone();
+    playVlTone(N.C5, 0.28, tone, 0.7);
+    playVlTone(N.E5, 0.28, tone, 0.55, 0.12);
+    playVlTone(N.G5, 0.35, tone, 0.5, 0.24);
+  }
+
+  function updateToneHud() {
+    const el = document.getElementById("vl-tone");
+    if (!el) return;
+    el.textContent = `VL-10 ${currentVlTone().label}`;
+    el.classList.toggle("show", toneFlashTimer > 0);
+  }
+
+  function setMusicMood(mood) {
+    if (!MUSIC[mood]) return;
+    if (musicMood === mood && !MUSIC[mood].oneshot) return;
+    musicMood = mood;
+    musicStep = 0;
+    musicAcc = 0;
+    musicOneShot = false;
+  }
+
+  function tickMusic(dt) {
+    if (!audioCtx || !musicMaster) return;
+    if (toneFlashTimer > 0) {
+      toneFlashTimer -= dt;
+      if (toneFlashTimer <= 0) updateToneHud();
+    }
+
+    const theme = MUSIC[musicMood] || MUSIC.ready;
+    if (theme.oneshot && musicOneShot) return;
+
+    let bpm = theme.bpm;
+    if (musicMood === "fright" && frightenedMax > 0) {
+      const life = Math.max(0, frightenedTimer / frightenedMax);
+      bpm = 100 + life * 100;
+    }
+
+    const stepDur = 60 / bpm / 2;
+    musicAcc += dt;
+    const tone = currentVlTone();
+    while (musicAcc >= stepDur) {
+      musicAcc -= stepDur;
+      const lead = theme.lead[musicStep % theme.lead.length];
+      const bass = theme.bass[musicStep % theme.bass.length];
+      const noteLen = stepDur * 0.9;
+      if (lead) playVlTone(lead, noteLen, tone, 0.58);
+      if (bass) playVlBass(bass, noteLen * 1.15, 0.42);
+      if (theme.rhythm) playVlRhythmHit(musicStep);
+      musicStep += 1;
+      if (theme.oneshot && musicStep >= theme.lead.length) {
+        musicOneShot = true;
+        break;
+      }
+    }
+  }
+
+  function playEatGhostJingle() {
+    ensureAudio();
+    const tone = currentVlTone();
+    [N.C5, N.E5, N.G5, N.C6].forEach((f, i) => {
+      playVlTone(f, 0.12, tone, 0.7, i * 0.055);
+    });
+  }
+
+  // Back-compat alias used nowhere critical
+  function playCasioNote(freq, dur, _type, vol, when = 0) {
+    playVlTone(freq, dur, currentVlTone(), vol, when);
+  }
+
   function formatScore(n) {
     return String(n).padStart(2, "0");
   }
@@ -623,12 +1205,66 @@ import * as THREE from "three";
     return jumpTimer > 0;
   }
 
+  function playFart(when = 0) {
+    if (!audioCtx) return;
+    try {
+      const t0 = audioCtx.currentTime + when;
+      const dur = 0.38;
+      // Low noisy "brrrp" — filtered noise + sliding square
+      const buf = audioCtx.createBuffer(1, Math.ceil(audioCtx.sampleRate * dur), audioCtx.sampleRate);
+      const data = buf.getChannelData(0);
+      let reg = 0xb00b;
+      for (let i = 0; i < data.length; i++) {
+        const env = Math.sin((i / data.length) * Math.PI) * (1 - i / data.length * 0.35);
+        reg ^= reg << 7;
+        reg ^= reg >>> 9;
+        reg ^= reg << 8;
+        const flutter = 0.55 + 0.45 * Math.sin(i * 0.09);
+        data[i] = ((reg & 0xffff) / 0x8000 - 1) * env * flutter;
+      }
+      const noise = audioCtx.createBufferSource();
+      noise.buffer = buf;
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.Q.value = 4;
+      filter.frequency.setValueAtTime(180, t0);
+      filter.frequency.exponentialRampToValueAtTime(90, t0 + 0.12);
+      filter.frequency.exponentialRampToValueAtTime(220, t0 + 0.28);
+      filter.frequency.exponentialRampToValueAtTime(70, t0 + dur);
+      const ng = audioCtx.createGain();
+      ng.gain.setValueAtTime(0.0001, t0);
+      ng.gain.exponentialRampToValueAtTime(0.55, t0 + 0.02);
+      ng.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+      const osc = audioCtx.createOscillator();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(95, t0);
+      osc.frequency.exponentialRampToValueAtTime(55, t0 + 0.2);
+      osc.frequency.exponentialRampToValueAtTime(40, t0 + dur);
+      const og = audioCtx.createGain();
+      og.gain.setValueAtTime(0.0001, t0);
+      og.gain.exponentialRampToValueAtTime(0.22, t0 + 0.03);
+      og.gain.exponentialRampToValueAtTime(0.0001, t0 + dur * 0.9);
+
+      noise.connect(filter);
+      filter.connect(ng);
+      ng.connect(audioCtx.destination);
+      osc.connect(og);
+      og.connect(audioCtx.destination);
+      noise.start(t0);
+      osc.start(t0);
+      osc.stop(t0 + dur + 0.02);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
   function tryJump() {
     if (state !== "playing") return false;
     if (jumpTimer > 0) return false;
     jumpTimer = JUMP_DURATION;
-    beep(520, 0.08, "square", 0.035);
-    beep(780, 0.1, "triangle", 0.03);
+    ensureAudio();
+    playFart();
     updateJumpHud();
     return true;
   }
@@ -685,6 +1321,7 @@ import * as THREE from "three";
     frightenedPoints = 200;
     dyingTimer = 0;
     jumpTimer = 0;
+    if (tripActive) restoreSceneColors();
     updateJumpHud();
   }
 
@@ -705,6 +1342,7 @@ import * as THREE from "three";
     refreshPelletVisibility();
     state = "ready";
     showOverlay("READY!", "Press Enter or Tap to Start", "ready");
+    setMusicMood("ready");
     updateHud();
 
     camPos.set(worldX(pacman.x) - 5, CAM_HEIGHT, worldZ(pacman.y) + CAM_DIST);
@@ -717,6 +1355,7 @@ import * as THREE from "three";
     ensureAudio();
     state = "playing";
     hideOverlay();
+    setMusicMood(frightenedTimer > 0 ? "fright" : "chase");
     beep(440, 0.1);
   }
 
@@ -741,6 +1380,7 @@ import * as THREE from "three";
 
   function activateFrightened() {
     frightenedTimer = Math.max(14 - level * 0.6, 9);
+    frightenedMax = frightenedTimer;
     frightenedPoints = 200;
     ghosts.forEach((g) => {
       if (g.mode !== "house" && g.mode !== "leaving" && !g.eaten) {
@@ -748,6 +1388,9 @@ import * as THREE from "three";
         reverseDir(g);
       }
     });
+    applyTripColors();
+    tripShuffleTimer = 0.2;
+    setMusicMood("fright");
     beep(220, 0.15, "triangle", 0.04);
   }
 
@@ -939,6 +1582,7 @@ import * as THREE from "three";
     if (pelletCount <= 0) {
       state = "won";
       showOverlay("YOU WIN!", "Enter / Tap for next level", "win");
+      setMusicMood("win");
       beep(880, 0.2, "triangle", 0.05);
     }
   }
@@ -958,6 +1602,7 @@ import * as THREE from "three";
           setHighScore();
           updateHud();
           beep(520, 0.12, "sawtooth", 0.04);
+          playEatGhostJingle();
         }
         continue;
       }
@@ -969,6 +1614,7 @@ import * as THREE from "three";
         setHighScore();
         updateHud();
         beep(520, 0.12, "sawtooth", 0.04);
+        playEatGhostJingle();
         continue;
       }
 
@@ -977,6 +1623,8 @@ import * as THREE from "three";
       jumpTimer = 0;
       lives -= 1;
       updateHud();
+      if (tripActive) restoreSceneColors();
+      setMusicMood("death");
       beep(120, 0.35, "sawtooth", 0.05);
       return;
     }
@@ -996,10 +1644,12 @@ import * as THREE from "three";
         if (lives <= 0) {
           state = "gameover";
           showOverlay("GAME OVER", "Enter / Tap to play again", "game-over");
+          setMusicMood("gameover");
         } else {
           resetActors();
           state = "ready";
           showOverlay("READY!", "Press Enter or Tap to continue", "ready");
+          setMusicMood("ready");
         }
       }
       return;
@@ -1019,13 +1669,24 @@ import * as THREE from "three";
 
     if (frightenedTimer > 0) {
       frightenedTimer -= dt;
+      tripShuffleTimer -= dt;
+      if (tripShuffleTimer <= 0) {
+        applyTripColors();
+        // Fast at start, progressively slower as power runs out
+        const life = Math.max(0, frightenedTimer / Math.max(frightenedMax, 0.001));
+        const interval = 0.2 + (1 - life) * (1 - life) * 1.4;
+        tripShuffleTimer = interval;
+      }
       if (frightenedTimer <= 0) {
         frightenedTimer = 0;
+        restoreSceneColors();
         ghosts.forEach((g) => {
           if (g.mode === "frightened") g.mode = globalMode;
         });
+        if (state === "playing") setMusicMood("chase");
       }
     } else {
+      if (tripActive) restoreSceneColors();
       modeTimer -= dt;
       if (modeTimer <= 0) nextMode();
     }
@@ -1046,6 +1707,7 @@ import * as THREE from "three";
       flashTimer += dt;
     }
     update(dt);
+    tickMusic(dt);
     syncActors3D();
     updateCamera(dt || 0.016);
     renderer.render(scene, camera);
@@ -1085,6 +1747,7 @@ import * as THREE from "three";
   }
 
   window.addEventListener("keydown", (e) => {
+    ensureAudio();
     const dir = dirFromKey(e.key);
     if (dir) {
       e.preventDefault();
@@ -1101,14 +1764,20 @@ import * as THREE from "three";
       if (state === "playing") {
         state = "paused";
         showOverlay("PAUSED", "Shift to resume", "");
+        setMusicMood("paused");
       } else if (state === "paused") {
         state = "playing";
         hideOverlay();
+        setMusicMood(frightenedTimer > 0 ? "fright" : "chase");
       } else onStartAction();
     } else if (e.key === " " || e.code === "Space") {
       e.preventDefault();
       if (e.repeat) return;
       tryJump();
+    } else if (e.key === "t" || e.key === "T") {
+      e.preventDefault();
+      if (e.repeat) return;
+      cycleVlTone(1);
     } else if (e.key === "Escape") {
       startLevel(true);
     }
@@ -1122,6 +1791,7 @@ import * as THREE from "three";
   stage.addEventListener(
     "touchstart",
     (e) => {
+      ensureAudio();
       const t = e.changedTouches[0];
       touchStart = { x: t.clientX, y: t.clientY, t: performance.now() };
       if (state === "ready" || state === "gameover" || state === "won") onStartAction();
