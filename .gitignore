@@ -11,3 +11,4 @@ dist/
 Thumbs.db
 data/hiscores.json
 .env*.local
+tmp-char-shots/

@@ -255,6 +255,22 @@ body {
   letter-spacing: 0.04em;
 }
 
+.char-preview-wrap {
+  width: min(280px, 70vw);
+  height: min(280px, 70vw);
+  border: 2px solid #6a3a5a;
+  background:
+    radial-gradient(circle at 50% 40%, #2a1830 0%, #0a0612 70%);
+  box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+#char-preview {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .scoreboard {
   list-style: none;
   margin: 0.4rem 0 0;
