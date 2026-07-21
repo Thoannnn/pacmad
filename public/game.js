@@ -96,6 +96,9 @@ import * as THREE from "three";
 
   const JUMP_DURATION = 0.7;
   const JUMP_HEIGHT = 1.35;
+  const GHOST_PAUSE_DUR = 0.5;
+  const GHOST_PAUSE_MIN = 5;
+  const GHOST_PAUSE_MAX = 35; // mean ≈ 20s
   const HS_MAX = 10;
   const NAME_LEN = 7;
   const NAME_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ .";
@@ -171,6 +174,10 @@ import * as THREE from "three";
     speed: 3.6,
   };
 
+  function nextGhostPauseDelay() {
+    return GHOST_PAUSE_MIN + Math.random() * (GHOST_PAUSE_MAX - GHOST_PAUSE_MIN);
+  }
+
   const ghosts = GHOST_DEFS.map((def) => ({
     ...def,
     x: def.start.x,
@@ -180,6 +187,8 @@ import * as THREE from "three";
     speed: 3.2,
     eaten: false,
     decided: false,
+    pauseTimer: 0,
+    pauseNext: nextGhostPauseDelay(),
   }));
 
   // ——— Three.js scene ———
@@ -708,6 +717,31 @@ import * as THREE from "three";
     });
   }
 
+  function makeGhostQuestionMark() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, 64, 64);
+    ctx.font = "bold 52px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.strokeStyle = "#111122";
+    ctx.lineWidth = 5;
+    ctx.strokeText("?", 32, 36);
+    ctx.fillStyle = "#fff8e0";
+    ctx.fillText("?", 32, 36);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true })
+    );
+    sprite.scale.set(0.28, 0.28, 0.28);
+    sprite.position.set(0, 0.72, 0);
+    sprite.visible = false;
+    return sprite;
+  }
+
   function makeGhostMesh(color) {
     const g = new THREE.Group();
     const body = new THREE.Mesh(
@@ -735,8 +769,12 @@ import * as THREE from "three";
       g.add(pupil);
     });
 
+    const question = makeGhostQuestionMark();
+    g.add(question);
+
     g.userData.body = body;
     g.userData.baseColor = color;
+    g.userData.question = question;
     g.position.y = 0.35;
     return g;
   }
@@ -854,6 +892,15 @@ import * as THREE from "three";
       }
 
       mesh.visible = state !== "dying";
+
+      const question = mesh.userData.question;
+      if (question) {
+        const pausing = g.pauseTimer > 0 && !g.eaten && state === "playing";
+        question.visible = pausing;
+        if (pausing) {
+          question.position.y = 0.72 + Math.sin(flashTimer * 14) * 0.025;
+        }
+      }
     });
 
     // Pulse power pellets
@@ -2263,6 +2310,8 @@ import * as THREE from "three";
       g.eaten = false;
       g.decided = false;
       g.speed = 3.2 + Math.min(level - 1, 4) * 0.075;
+      g.pauseTimer = 0;
+      g.pauseNext = nextGhostPauseDelay();
     });
 
     releaseTimer = 0;
@@ -2583,6 +2632,31 @@ import * as THREE from "three";
     }
   }
 
+  function canGhostPause(g) {
+    if (g.eaten) return false;
+    if (g.mode === "house" || g.mode === "leaving") return false;
+    return g.mode === "chase" || g.mode === "scatter" || g.mode === "frightened";
+  }
+
+  function tickGhostPauses(dt) {
+    ghosts.forEach((g) => {
+      if (g.pauseTimer > 0) {
+        g.pauseTimer -= dt;
+        if (g.pauseTimer <= 0) {
+          g.pauseTimer = 0;
+          g.pauseNext = nextGhostPauseDelay();
+        }
+        return;
+      }
+      if (!canGhostPause(g)) return;
+      g.pauseNext -= dt;
+      if (g.pauseNext <= 0) {
+        g.pauseTimer = GHOST_PAUSE_DUR;
+        g.pauseNext = nextGhostPauseDelay();
+      }
+    });
+  }
+
   function releaseGhosts(dt) {
     releaseTimer += dt;
     ghosts.forEach((g) => {
@@ -2643,11 +2717,15 @@ import * as THREE from "three";
     }
 
     releaseGhosts(dt);
+    tickGhostPauses(dt);
     moveActor(pacman, dt, false);
     eatAtPacman();
     if (state !== "playing") return;
 
-    ghosts.forEach((g) => moveActor(g, dt, true));
+    ghosts.forEach((g) => {
+      if (g.pauseTimer > 0) return;
+      moveActor(g, dt, true);
+    });
     collideGhosts();
   }
 
