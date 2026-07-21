@@ -91,8 +91,11 @@ import * as THREE from "three";
   const overlaySub = document.getElementById("overlay-sub");
   const jumpBtn = document.getElementById("jump-btn");
   const levelBtn = document.getElementById("level-btn");
+  const charBtn = document.getElementById("char-btn");
   const levelSelectEl = document.getElementById("level-select");
   const levelPickValEl = document.getElementById("level-pick-val");
+  const charSelectEl = document.getElementById("char-select");
+  const charPickValEl = document.getElementById("char-pick-val");
   const nameEntryEl = document.getElementById("name-entry");
   const nameSlotsEl = document.getElementById("name-slots");
   const scoreboardEl = document.getElementById("scoreboard");
@@ -108,6 +111,32 @@ import * as THREE from "three";
   const HS_KEY = "pacmad-hiscores";
   const LEVEL_COOKIE = "pacmad-level";
   const LEVEL_SELECT_MAX = 99;
+  const CHAR_KEY = "pacmad-character";
+  const CHARACTERS = [
+    { id: "pacman", label: "PAC-MAN", color: 0xffd700, emissive: 0xaa7700, limb: 0xffc400, limbEm: 0x996600 },
+    { id: "lady", label: "LADY PAC", color: 0xffcc44, emissive: 0xbb5500, limb: 0xffb020, limbEm: 0x994400 },
+    { id: "cinnamoroll", label: "CINNAMO", color: 0xf5f9ff, emissive: 0x88b0e8, limb: 0xe8f0ff, limbEm: 0x99b8dd },
+    { id: "kuromi", label: "KUROMI", color: 0x2a2436, emissive: 0x883355, limb: 0x3a3048, limbEm: 0x662244 },
+  ];
+
+  function loadCharacterId() {
+    try {
+      const saved = localStorage.getItem(CHAR_KEY);
+      if (CHARACTERS.some((c) => c.id === saved)) return saved;
+    } catch (_) {
+      /* ignore */
+    }
+    return "pacman";
+  }
+
+  function currentCharacter() {
+    return CHARACTERS.find((c) => c.id === characterId) || CHARACTERS[0];
+  }
+
+  function charIndexOf(id) {
+    const i = CHARACTERS.findIndex((c) => c.id === id);
+    return i >= 0 ? i : 0;
+  }
 
   function loadSavedLevel() {
     try {
@@ -136,6 +165,8 @@ import * as THREE from "three";
   let highScore = Number(localStorage.getItem("pacman-high") || 0);
   let hiscores = [];
   let levelPick = 1;
+  let characterId = loadCharacterId();
+  let charPick = charIndexOf(characterId);
   let nameChars = Array(NAME_LEN).fill("A");
   let nameCursor = 0;
   let lastEnteredRank = -1;
@@ -357,9 +388,16 @@ import * as THREE from "three";
     hemi.groundColor.set(0x111122);
     sun.color.set(0xffffff);
     if (pacMesh?.userData?.bodyMat) {
-      pacMesh.userData.bodyMat.color.set(0xffd700);
-      pacMesh.userData.bodyMat.emissive.set(0xaa7700);
+      const ch = currentCharacter();
+      pacMesh.userData.bodyMat.color.set(ch.color);
+      pacMesh.userData.bodyMat.emissive.set(ch.emissive);
       pacMesh.userData.bodyMat.emissiveIntensity = 0.35;
+    }
+    if (pacMesh?.userData?.limbMat) {
+      const ch = currentCharacter();
+      pacMesh.userData.limbMat.color.set(ch.limb);
+      pacMesh.userData.limbMat.emissive.set(ch.limbEm);
+      pacMesh.userData.limbMat.emissiveIntensity = 0.4;
     }
     ghostMeshes.forEach((mesh, i) => {
       const body = mesh.userData.body;
@@ -563,22 +601,21 @@ import * as THREE from "three";
   }
 
   function makePacmanMesh() {
+    const ch = currentCharacter();
     const g = new THREE.Group();
-    // Local facing: +Z = forward
     const mat = new THREE.MeshStandardMaterial({
-      color: 0xffd700,
-      emissive: 0xaa7700,
+      color: ch.color,
+      emissive: ch.emissive,
       emissiveIntensity: 0.35,
       roughness: 0.4,
     });
     const limbMat = new THREE.MeshStandardMaterial({
-      color: 0xffc400,
-      emissive: 0x996600,
+      color: ch.limb,
+      emissive: ch.limbEm,
       emissiveIntensity: 0.4,
       roughness: 0.45,
     });
 
-    // Classic Pac-Man: upper + lower hemispheres open horizontally (rotate on X)
     const jawPivot = new THREE.Group();
     const upper = new THREE.Mesh(
       new THREE.SphereGeometry(0.36, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2),
@@ -593,8 +630,9 @@ import * as THREE from "three";
     jawPivot.add(upper);
     jawPivot.add(lower);
 
-    // Dark gullet + plug so legs never show through the open mouth
-    const gulletMat = new THREE.MeshBasicMaterial({ color: 0x140600 });
+    const gulletMat = new THREE.MeshBasicMaterial({
+      color: ch.id === "cinnamoroll" ? 0xffccdd : ch.id === "kuromi" ? 0x1a1020 : 0x140600,
+    });
     const gullet = new THREE.Mesh(new THREE.SphereGeometry(0.31, 24, 18), gulletMat);
     gullet.renderOrder = 1;
     jawPivot.add(gullet);
@@ -612,25 +650,171 @@ import * as THREE from "three";
     pacLower = lower;
     pacBody = jawPivot;
     g.userData.bodyMat = mat;
+    g.userData.limbMat = limbMat;
+    g.userData.characterId = ch.id;
 
-    // Big eyes on the upper half — pupils track nearest ghost
-    const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
-    const eyePupilMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+    const eyeWhiteMat = new THREE.MeshStandardMaterial({
+      color: ch.id === "kuromi" ? 0xfff5aa : 0xffffff,
+    });
+    const eyePupilMat = new THREE.MeshStandardMaterial({
+      color: ch.id === "cinnamoroll" ? 0x4488cc : ch.id === "kuromi" ? 0x221133 : 0x111111,
+    });
     pacEyes = [];
+    const eyeY = ch.id === "lady" ? 0.22 : 0.2;
+    const eyeSpread = ch.id === "cinnamoroll" ? 0.12 : 0.15;
     [-1, 1].forEach((side) => {
-      const white = new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 12), eyeWhiteMat);
-      white.position.set(side * 0.15, 0.2, 0.2);
+      const white = new THREE.Mesh(
+        new THREE.SphereGeometry(ch.id === "cinnamoroll" ? 0.1 : 0.13, 14, 12),
+        eyeWhiteMat
+      );
+      white.position.set(side * eyeSpread, eyeY, 0.2);
       white.castShadow = true;
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.065, 12, 10), eyePupilMat);
+      const pupil = new THREE.Mesh(
+        new THREE.SphereGeometry(ch.id === "cinnamoroll" ? 0.055 : 0.065, 12, 10),
+        eyePupilMat
+      );
       pupil.position.set(0, 0, 0.08);
       white.add(pupil);
+      // Lady lashes
+      if (ch.id === "lady") {
+        const lashMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+        for (let i = 0; i < 3; i++) {
+          const lash = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.06, 0.01), lashMat);
+          lash.position.set((i - 1) * 0.04, 0.12, 0.05);
+          lash.rotation.z = (i - 1) * 0.35;
+          white.add(lash);
+        }
+      }
       upper.add(white);
       pacEyes.push({ white, pupil, side });
     });
 
     pacMouth = jawPivot;
 
-    // Arms — outside body on ±X
+    // Character-specific accessories
+    if (ch.id === "lady") {
+      const bowRed = new THREE.MeshStandardMaterial({
+        color: 0xff2255,
+        emissive: 0x880022,
+        emissiveIntensity: 0.35,
+        roughness: 0.5,
+      });
+      const bow = new THREE.Group();
+      bow.position.set(0.12, 0.38, 0.05);
+      const knot = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), bowRed);
+      bow.add(knot);
+      [-1, 1].forEach((s) => {
+        const loop = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 10), bowRed);
+        loop.scale.set(1.3, 0.7, 0.45);
+        loop.position.set(s * 0.11, 0.02, 0);
+        bow.add(loop);
+      });
+      g.add(bow);
+      // Mole
+      const mole = new THREE.Mesh(
+        new THREE.SphereGeometry(0.025, 8, 6),
+        new THREE.MeshBasicMaterial({ color: 0x553311 })
+      );
+      mole.position.set(0.18, 0.05, 0.3);
+      upper.add(mole);
+      // Lip tint
+      const lip = new THREE.Mesh(
+        new THREE.TorusGeometry(0.12, 0.025, 8, 16, Math.PI),
+        new THREE.MeshBasicMaterial({ color: 0xff4477 })
+      );
+      lip.rotation.x = Math.PI / 2;
+      lip.position.set(0, -0.02, 0.28);
+      lower.add(lip);
+    }
+
+    if (ch.id === "cinnamoroll") {
+      const earMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        emissive: 0xaaccff,
+        emissiveIntensity: 0.2,
+        roughness: 0.55,
+      });
+      const pinkMat = new THREE.MeshStandardMaterial({
+        color: 0xffb6c8,
+        emissive: 0xff6688,
+        emissiveIntensity: 0.25,
+        roughness: 0.6,
+      });
+      [-1, 1].forEach((side) => {
+        const ear = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.42, 6, 10), earMat);
+        ear.position.set(side * 0.22, 0.42, -0.05);
+        ear.rotation.z = side * 0.55;
+        ear.rotation.x = -0.35;
+        ear.castShadow = true;
+        g.add(ear);
+        const tip = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), earMat);
+        tip.position.set(side * 0.38, 0.62, -0.18);
+        g.add(tip);
+      });
+      // Cheeks
+      [-1, 1].forEach((side) => {
+        const cheek = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), pinkMat);
+        cheek.position.set(side * 0.28, 0.02, 0.22);
+        upper.add(cheek);
+      });
+      // Tail fluff
+      const tail = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 10), earMat);
+      tail.position.set(0, -0.05, -0.4);
+      g.add(tail);
+    }
+
+    if (ch.id === "kuromi") {
+      const hoodMat = new THREE.MeshStandardMaterial({
+        color: 0x1a1228,
+        emissive: 0x441133,
+        emissiveIntensity: 0.3,
+        roughness: 0.55,
+      });
+      const pinkMat = new THREE.MeshStandardMaterial({
+        color: 0xff66aa,
+        emissive: 0xaa2255,
+        emissiveIntensity: 0.4,
+        roughness: 0.45,
+      });
+      const skullMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        emissive: 0xaaaaaa,
+        emissiveIntensity: 0.2,
+        roughness: 0.4,
+      });
+      // Jester hood
+      const hood = new THREE.Mesh(new THREE.SphereGeometry(0.4, 20, 16, 0, Math.PI * 2, 0, Math.PI * 0.55), hoodMat);
+      hood.position.set(0, 0.08, -0.02);
+      g.add(hood);
+      // Pointy ears / tips
+      [-1, 1].forEach((side) => {
+        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.32, 8), hoodMat);
+        tip.position.set(side * 0.28, 0.52, -0.05);
+        tip.rotation.z = side * -0.45;
+        tip.castShadow = true;
+        g.add(tip);
+        const puff = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), pinkMat);
+        puff.position.set(side * 0.4, 0.68, -0.08);
+        g.add(puff);
+      });
+      // Skull badge
+      const skull = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 10), skullMat);
+      skull.position.set(0, 0.42, 0.18);
+      g.add(skull);
+      const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.055, 10, 8), skullMat);
+      jaw.scale.set(1, 0.7, 0.8);
+      jaw.position.set(0, 0.34, 0.2);
+      g.add(jaw);
+      // Crossbone X
+      const boneMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      [-1, 1].forEach((s) => {
+        const bone = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.025, 0.025), boneMat);
+        bone.position.set(0, 0.3, 0.24);
+        bone.rotation.z = s * 0.7;
+        g.add(bone);
+      });
+    }
+
     function makeArm(side) {
       const pivot = new THREE.Group();
       pivot.position.set(side * 0.34, 0.02, -0.08);
@@ -647,7 +831,6 @@ import * as THREE from "three";
       return pivot;
     }
 
-    // Legs far behind the body — outside mouth view (+Z)
     function makeLeg(side) {
       const pivot = new THREE.Group();
       pivot.position.set(side * 0.1, -0.34, -0.32);
@@ -2415,6 +2598,7 @@ import * as THREE from "three";
     hideNameEntry();
     hideScoreboard();
     hideLevelSelect();
+    hideCharSelect();
   }
 
   function normalizeHiscores(raw) {
@@ -2568,7 +2752,7 @@ import * as THREE from "three";
   }
 
   function openLevelSelect() {
-    if (state === "entername" || state === "dying") return;
+    if (state === "entername" || state === "dying" || state === "charselect") return;
     ensureAudio();
     if (state === "playing") {
       state = "paused";
@@ -2600,7 +2784,71 @@ import * as THREE from "three";
   function cancelLevelSelect() {
     hideLevelSelect();
     state = "ready";
-    showOverlay("READY!", `LEVEL ${level} — Enter / Tap to Start · H = scores`, "ready");
+    showOverlay("READY!", `LEVEL ${level} — Enter / Tap · CHAR / LEVEL`, "ready");
+    setMusicMood("ready");
+  }
+
+  function renderCharPick() {
+    if (charPickValEl) {
+      const c = CHARACTERS[charPick] || CHARACTERS[0];
+      charPickValEl.textContent = c.label;
+    }
+  }
+
+  function showCharSelect() {
+    if (charSelectEl) charSelectEl.classList.remove("hidden");
+    hideNameEntry();
+    hideScoreboard();
+    hideLevelSelect();
+    renderCharPick();
+  }
+
+  function hideCharSelect() {
+    if (charSelectEl) charSelectEl.classList.add("hidden");
+  }
+
+  function openCharSelect() {
+    if (state === "entername" || state === "dying" || state === "levelselect") return;
+    ensureAudio();
+    if (state === "playing") {
+      state = "paused";
+      showOverlay("PAUSED", "Pick a character", "ready");
+      setMusicMood("ready");
+    }
+    if (state === "won") clearWinFx();
+    charPick = charIndexOf(characterId);
+    state = "charselect";
+    showOverlay("CHARACTER", "◀ ▶ then OK · Esc cancel", "ready");
+    showCharSelect();
+    beep(560, 0.06, "triangle", 0.025);
+  }
+
+  function nudgeCharPick(dir) {
+    charPick = (charPick + dir + CHARACTERS.length) % CHARACTERS.length;
+    renderCharPick();
+    beep(440 + charPick * 40, 0.04, "square", 0.02);
+  }
+
+  function confirmCharSelect() {
+    characterId = CHARACTERS[charPick].id;
+    try {
+      localStorage.setItem(CHAR_KEY, characterId);
+    } catch (_) {
+      /* ignore */
+    }
+    hideCharSelect();
+    initActors3D();
+    state = "ready";
+    showOverlay("READY!", `${currentCharacter().label} · LEVEL ${level}`, "ready");
+    setMusicMood("ready");
+    updateHud();
+    beep(700, 0.1, "triangle", 0.03);
+  }
+
+  function cancelCharSelect() {
+    hideCharSelect();
+    state = "ready";
+    showOverlay("READY!", `LEVEL ${level} — Enter / Tap · CHAR / LEVEL`, "ready");
     setMusicMood("ready");
   }
 
@@ -2773,10 +3021,11 @@ import * as THREE from "three";
     initActors3D();
     refreshPelletVisibility();
     state = "ready";
-    showOverlay("READY!", `LEVEL ${level} — Enter / Tap to Start · L = level`, "ready");
+    showOverlay("READY!", `LEVEL ${level} — Enter / Tap · CHAR / LEVEL`, "ready");
     hideNameEntry();
     hideScoreboard();
     hideLevelSelect();
+    hideCharSelect();
     setMusicMood("ready");
     updateHud();
 
@@ -3162,7 +3411,7 @@ import * as THREE from "three";
   function loop(ts, frame) {
     const dt = Math.min((ts - lastTs) / 1000, 0.05);
     lastTs = ts || performance.now();
-    if (state === "ready" || state === "paused" || state === "won" || state === "gameover" || state === "entername" || state === "levelselect") {
+    if (state === "ready" || state === "paused" || state === "won" || state === "gameover" || state === "entername" || state === "levelselect" || state === "charselect") {
       flashTimer += dt;
       if (state === "entername") renderNameSlots();
     }
@@ -3200,6 +3449,10 @@ import * as THREE from "three";
     }
     if (state === "levelselect") {
       confirmLevelSelect();
+      return;
+    }
+    if (state === "charselect") {
+      confirmCharSelect();
       return;
     }
     if (state === "ready") beginPlay();
@@ -3252,6 +3505,39 @@ import * as THREE from "three";
         }
         return;
       }
+      if (state === "charselect") {
+        if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A" || e.code === "KeyA") {
+          e.preventDefault();
+          nudgeCharPick(-1);
+          return;
+        }
+        if (e.key === "ArrowRight" || e.key === "d" || e.key === "D" || e.code === "KeyD") {
+          e.preventDefault();
+          nudgeCharPick(1);
+          return;
+        }
+        if (e.key === "ArrowUp" || e.key === "w" || e.key === "W") {
+          e.preventDefault();
+          nudgeCharPick(1);
+          return;
+        }
+        if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") {
+          e.preventDefault();
+          nudgeCharPick(-1);
+          return;
+        }
+        if (e.key === "Enter") {
+          e.preventDefault();
+          confirmCharSelect();
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          cancelCharSelect();
+          return;
+        }
+        return;
+      }
       const dir = dirFromKey(e.key, e.code);
       if (dir) {
         e.preventDefault();
@@ -3286,6 +3572,9 @@ import * as THREE from "three";
       } else if (e.key === "l" || e.key === "L") {
         e.preventDefault();
         openLevelSelect();
+      } else if (e.key === "c" || e.key === "C") {
+        e.preventDefault();
+        openCharSelect();
       } else if (e.key === "h" || e.key === "H") {
         e.preventDefault();
         if (state === "ready" || state === "gameover") {
@@ -3324,7 +3613,7 @@ import * as THREE from "three";
   stage.addEventListener(
     "touchend",
     (e) => {
-      if (state === "entername" || state === "levelselect") {
+      if (state === "entername" || state === "levelselect" || state === "charselect") {
         touchStart = null;
         return;
       }
@@ -3372,11 +3661,11 @@ import * as THREE from "three";
   );
 
   overlay.addEventListener("click", (e) => {
-    if (state === "entername" || state === "levelselect") return;
+    if (state === "entername" || state === "levelselect" || state === "charselect") return;
     onStartAction();
   });
   stage.addEventListener("click", () => {
-    if (state === "entername" || state === "levelselect") return;
+    if (state === "entername" || state === "levelselect" || state === "charselect") return;
     if (state === "ready" || state === "gameover" || state === "won") onStartAction();
   });
 
@@ -3396,12 +3685,27 @@ import * as THREE from "three";
     });
   }
 
+  if (charBtn) {
+    charBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openCharSelect();
+    });
+  }
+
   const levelMinus = document.getElementById("level-minus");
   const levelPlus = document.getElementById("level-plus");
   const levelOk = document.getElementById("level-ok");
   if (levelMinus) levelMinus.addEventListener("click", (e) => { e.stopPropagation(); if (state === "levelselect") nudgeLevelPick(-1); });
   if (levelPlus) levelPlus.addEventListener("click", (e) => { e.stopPropagation(); if (state === "levelselect") nudgeLevelPick(1); });
   if (levelOk) levelOk.addEventListener("click", (e) => { e.stopPropagation(); if (state === "levelselect") confirmLevelSelect(); });
+
+  const charMinus = document.getElementById("char-minus");
+  const charPlus = document.getElementById("char-plus");
+  const charOk = document.getElementById("char-ok");
+  if (charMinus) charMinus.addEventListener("click", (e) => { e.stopPropagation(); if (state === "charselect") nudgeCharPick(-1); });
+  if (charPlus) charPlus.addEventListener("click", (e) => { e.stopPropagation(); if (state === "charselect") nudgeCharPick(1); });
+  if (charOk) charOk.addEventListener("click", (e) => { e.stopPropagation(); if (state === "charselect") confirmCharSelect(); });
 
   const namePrev = document.getElementById("name-prev");
   const nameNext = document.getElementById("name-next");

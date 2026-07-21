@@ -55,6 +55,16 @@
           <button type="button" id="level-ok" class="name-ctrl name-ok">OK</button>
           <p class="name-hint">←→ · Enter · Esc</p>
         </div>
+        <div id="char-select" class="level-select hidden" aria-label="Character select">
+          <p class="name-label">SELECT CHARACTER</p>
+          <div class="level-picker">
+            <button type="button" id="char-minus" class="name-ctrl" aria-label="Previous character">◀</button>
+            <span id="char-pick-val" class="level-pick-val char-pick-val">PAC-MAN</span>
+            <button type="button" id="char-plus" class="name-ctrl" aria-label="Next character">▶</button>
+          </div>
+          <button type="button" id="char-ok" class="name-ctrl name-ok">OK</button>
+          <p class="name-hint">←→ · Enter · Esc</p>
+        </div>
         <ol id="scoreboard" class="scoreboard hidden" aria-label="High scores"></ol>
       </div>
     </main>
@@ -63,11 +73,12 @@
       <div class="jump-wrap">
         <button type="button" id="ar-btn" class="ar-btn" aria-label="Enter AR" hidden>AR</button>
         <button type="button" id="recenter-btn" class="recenter-btn" aria-label="Recenter board" hidden>RECENTER</button>
+        <button type="button" id="char-btn" class="char-btn" aria-label="Select character">CHAR</button>
         <button type="button" id="level-btn" class="level-btn" aria-label="Select level">LEVEL</button>
         <button type="button" id="jump-btn" class="jump-btn" aria-label="Jump">JUMP ␣</button>
       </div>
       <div id="lives" class="lives" aria-label="Lives remaining"></div>
-      <p class="hint">Frecce + WASD · Space salto · LEVEL / L · H = scores · Tono tap/T · AR</p>
+      <p class="hint">Frecce + WASD · Space · CHAR / C · LEVEL / L · H scores · T tono · AR</p>
       <p id="vl-tone" class="vl-tone show" aria-live="polite" role="button" tabindex="0">TONE: FLUTE</p>
     </footer>
   </div>
