@@ -74,6 +74,11 @@ body {
   letter-spacing: 0.08em;
 }
 
+.level-label {
+  margin-top: 0.35rem;
+  color: #7dffe0;
+}
+
 .brand {
   font-size: clamp(0.7rem, 2.5vw, 0.95rem);
   color: var(--text);

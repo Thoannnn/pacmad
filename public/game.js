@@ -84,6 +84,7 @@ import * as THREE from "three";
   const stage = document.getElementById("stage");
   const scoreEl = document.getElementById("score");
   const highEl = document.getElementById("high-score");
+  const levelEl = document.getElementById("level");
   const livesEl = document.getElementById("lives");
   const overlay = document.getElementById("overlay");
   const overlayTitle = document.getElementById("overlay-title");
@@ -99,6 +100,28 @@ import * as THREE from "three";
   const NAME_LEN = 7;
   const NAME_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ .";
   const HS_KEY = "pacmad-hiscores";
+  const LEVEL_COOKIE = "pacmad-level";
+
+  function loadSavedLevel() {
+    try {
+      const m = document.cookie.match(/(?:^|; )pacmad-level=(\d+)/);
+      if (m) return Math.max(1, parseInt(m[1], 10) || 1);
+    } catch (_) {
+      /* ignore */
+    }
+    const ls = Number(localStorage.getItem(LEVEL_COOKIE) || 0);
+    return ls >= 1 ? Math.floor(ls) : 1;
+  }
+
+  function saveLevel() {
+    const n = Math.max(1, Math.floor(level));
+    try {
+      document.cookie = `${LEVEL_COOKIE}=${n};path=/;max-age=31536000;SameSite=Lax`;
+    } catch (_) {
+      /* ignore */
+    }
+    localStorage.setItem(LEVEL_COOKIE, String(n));
+  }
 
   let maze = [];
   let pelletCount = 0;
@@ -109,7 +132,7 @@ import * as THREE from "three";
   let nameCursor = 0;
   let lastEnteredRank = -1;
   let lives = 3;
-  let level = 1;
+  let level = loadSavedLevel();
   let state = "ready";
   let frightenedTimer = 0;
   let frightenedMax = 14;
@@ -1908,6 +1931,7 @@ import * as THREE from "three";
   function updateHud() {
     scoreEl.textContent = formatScore(score);
     highEl.textContent = formatScore(highScore);
+    if (levelEl) levelEl.textContent = String(level);
     livesEl.innerHTML = "";
     for (let i = 0; i < Math.max(0, lives - (state === "dying" ? 1 : 0)); i++) {
       const d = document.createElement("div");
@@ -2155,8 +2179,10 @@ import * as THREE from "three";
     if (resetScore) {
       score = 0;
       lives = 3;
-      level = 1;
+      // Keep progress: restart at saved level even after death
+      level = loadSavedLevel();
     }
+    saveLevel();
     modeIndex = 0;
     modeTimer = MODE_SCHEDULE[0].duration;
     globalMode = MODE_SCHEDULE[0].mode;
@@ -2166,7 +2192,7 @@ import * as THREE from "three";
     initActors3D();
     refreshPelletVisibility();
     state = "ready";
-    showOverlay("READY!", "Press Enter or Tap to Start · H = scores", "ready");
+    showOverlay("READY!", `LEVEL ${level} — Enter / Tap to Start · H = scores`, "ready");
     hideNameEntry();
     hideScoreboard();
     setMusicMood("ready");
@@ -2567,6 +2593,7 @@ import * as THREE from "three";
     else if (state === "gameover") startLevel(true);
     else if (state === "won") {
       level += 1;
+      saveLevel();
       startLevel(false);
     }
   }
