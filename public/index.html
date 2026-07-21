@@ -32,6 +32,19 @@
       <div id="overlay" class="overlay">
         <p id="overlay-title" class="overlay-title ready">READY!</p>
         <p id="overlay-sub" class="overlay-sub">Press Enter or Tap to Start</p>
+        <div id="name-entry" class="name-entry hidden" aria-label="Name entry">
+          <p class="name-label">ENTER YOUR NAME</p>
+          <div id="name-slots" class="name-slots"></div>
+          <div class="name-controls">
+            <button type="button" id="name-prev" class="name-ctrl">◀</button>
+            <button type="button" id="name-up" class="name-ctrl">▲</button>
+            <button type="button" id="name-down" class="name-ctrl">▼</button>
+            <button type="button" id="name-next" class="name-ctrl">▶</button>
+            <button type="button" id="name-ok" class="name-ctrl name-ok">OK</button>
+          </div>
+          <p class="name-hint">7 letters · ←→ · ↑↓ · type · Enter</p>
+        </div>
+        <ol id="scoreboard" class="scoreboard hidden" aria-label="High scores"></ol>
       </div>
     </main>
 
@@ -42,7 +55,7 @@
         <button type="button" id="jump-btn" class="jump-btn" aria-label="Jump">JUMP ␣</button>
       </div>
       <div id="lives" class="lives" aria-label="Lives remaining"></div>
-      <p class="hint">Frecce + WASD muovono · Space salto · Tono tap/T · AR · Shift pausa</p>
+      <p class="hint">Frecce + WASD · Space salto · H = high scores · Tono tap/T · AR</p>
       <p id="vl-tone" class="vl-tone show" aria-live="polite" role="button" tabindex="0">TONE: FLUTE</p>
     </footer>
   </div>

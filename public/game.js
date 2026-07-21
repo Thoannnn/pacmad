@@ -88,14 +88,25 @@ import * as THREE from "three";
   const overlayTitle = document.getElementById("overlay-title");
   const overlaySub = document.getElementById("overlay-sub");
   const jumpBtn = document.getElementById("jump-btn");
+  const nameEntryEl = document.getElementById("name-entry");
+  const nameSlotsEl = document.getElementById("name-slots");
+  const scoreboardEl = document.getElementById("scoreboard");
 
   const JUMP_DURATION = 0.7;
   const JUMP_HEIGHT = 1.35;
+  const HS_MAX = 10;
+  const NAME_LEN = 7;
+  const NAME_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ .";
+  const HS_KEY = "pacmad-hiscores";
 
   let maze = [];
   let pelletCount = 0;
   let score = 0;
   let highScore = Number(localStorage.getItem("pacman-high") || 0);
+  let hiscores = [];
+  let nameChars = Array(NAME_LEN).fill("A");
+  let nameCursor = 0;
+  let lastEnteredRank = -1;
   let lives = 3;
   let level = 1;
   let state = "ready";
@@ -1060,6 +1071,10 @@ import * as THREE from "three";
       return;
     }
     // Normal play: tap / trigger commands Pacman (not the board)
+    if (state === "entername") {
+      confirmNameEntry();
+      return;
+    }
     if (state === "ready" || state === "gameover" || state === "won") onStartAction();
     else if (state === "playing") tryJump();
   }
@@ -1876,12 +1891,201 @@ import * as THREE from "three";
 
   function hideOverlay() {
     overlay.classList.add("hidden");
+    hideNameEntry();
+    hideScoreboard();
+  }
+
+  function loadHiscores() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(HS_KEY) || "[]");
+      if (Array.isArray(raw) && raw.length) {
+        return raw
+          .filter((e) => e && typeof e.score === "number" && typeof e.name === "string")
+          .map((e) => ({
+            name: String(e.name).toUpperCase().padEnd(NAME_LEN).slice(0, NAME_LEN),
+            score: Math.max(0, Math.floor(e.score)),
+          }))
+          .sort((a, b) => b.score - a.score)
+          .slice(0, HS_MAX);
+      }
+    } catch (_) {
+      /* ignore */
+    }
+    if (highScore > 0) return [{ name: "PLAYER ", score: highScore }];
+    return [];
+  }
+
+  function saveHiscores() {
+    localStorage.setItem(HS_KEY, JSON.stringify(hiscores));
+    if (hiscores.length) {
+      highScore = hiscores[0].score;
+      localStorage.setItem("pacman-high", String(highScore));
+    }
+  }
+
+  function qualifiesForHiscore(s) {
+    if (s <= 0) return false;
+    if (hiscores.length < HS_MAX) return true;
+    return s > hiscores[hiscores.length - 1].score;
   }
 
   function setHighScore() {
+    // Keep top HUD in sync; full board updates on game over / name entry
     if (score > highScore) {
       highScore = score;
       localStorage.setItem("pacman-high", String(highScore));
+    }
+  }
+
+  function renderNameSlots() {
+    if (!nameSlotsEl) return;
+    nameSlotsEl.innerHTML = "";
+    for (let i = 0; i < NAME_LEN; i++) {
+      const slot = document.createElement("div");
+      slot.className = "name-slot" + (i === nameCursor ? " active" : "");
+      slot.textContent = nameChars[i] === " " ? "_" : nameChars[i];
+      nameSlotsEl.appendChild(slot);
+    }
+  }
+
+  function showNameEntry() {
+    if (nameEntryEl) nameEntryEl.classList.remove("hidden");
+    hideScoreboard();
+    renderNameSlots();
+  }
+
+  function hideNameEntry() {
+    if (nameEntryEl) nameEntryEl.classList.add("hidden");
+  }
+
+  function renderScoreboard(highlightName = null) {
+    if (!scoreboardEl) return;
+    scoreboardEl.innerHTML = "";
+    if (!hiscores.length) {
+      const li = document.createElement("li");
+      li.innerHTML = `<span class="rank">-</span><span class="name">-------</span><span class="pts">00</span>`;
+      scoreboardEl.appendChild(li);
+    } else {
+      hiscores.forEach((e, i) => {
+        const li = document.createElement("li");
+        if (highlightName && e.name === highlightName && i === lastEnteredRank) li.classList.add("you");
+        li.innerHTML = `<span class="rank">${String(i + 1).padStart(2, "0")}</span><span class="name">${e.name.replace(/ /g, "\u00A0")}</span><span class="pts">${formatScore(e.score)}</span>`;
+        scoreboardEl.appendChild(li);
+      });
+    }
+    scoreboardEl.classList.remove("hidden");
+  }
+
+  function hideScoreboard() {
+    if (scoreboardEl) scoreboardEl.classList.add("hidden");
+  }
+
+  function beginNameEntry() {
+    state = "entername";
+    nameChars = Array(NAME_LEN).fill("A");
+    nameCursor = 0;
+    lastEnteredRank = -1;
+    showOverlay("HIGH SCORE!", `Score ${formatScore(score)} — enter name`, "win");
+    showNameEntry();
+    setMusicMood("win");
+  }
+
+  function cycleNameChar(dir) {
+    const cur = nameChars[nameCursor];
+    let idx = NAME_CHARS.indexOf(cur);
+    if (idx < 0) idx = 0;
+    idx = (idx + dir + NAME_CHARS.length) % NAME_CHARS.length;
+    nameChars[nameCursor] = NAME_CHARS[idx];
+    renderNameSlots();
+  }
+
+  function moveNameCursor(dir) {
+    nameCursor = Math.max(0, Math.min(NAME_LEN - 1, nameCursor + dir));
+    renderNameSlots();
+  }
+
+  function typeNameChar(ch) {
+    const up = ch.toUpperCase();
+    if (!NAME_CHARS.includes(up)) return;
+    nameChars[nameCursor] = up;
+    if (nameCursor < NAME_LEN - 1) nameCursor += 1;
+    renderNameSlots();
+  }
+
+  function confirmNameEntry() {
+    const name = nameChars.join("").toUpperCase().padEnd(NAME_LEN).slice(0, NAME_LEN);
+    hiscores.push({ name, score });
+    hiscores.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+    hiscores = hiscores.slice(0, HS_MAX);
+    lastEnteredRank = hiscores.findIndex((e) => e.name === name && e.score === score);
+    saveHiscores();
+    updateHud();
+    hideNameEntry();
+    state = "gameover";
+    showOverlay("GAME OVER", "Enter / Tap to play again", "game-over");
+    renderScoreboard(name);
+    setMusicMood("gameover");
+    beep(660, 0.08, "square", 0.03);
+  }
+
+  function handleNameEntryKey(e) {
+    if (e.key === "ArrowLeft" || e.code === "ArrowLeft" || e.key === "a" || e.key === "A") {
+      e.preventDefault();
+      moveNameCursor(-1);
+      return true;
+    }
+    if (e.key === "ArrowRight" || e.code === "ArrowRight" || e.key === "d" || e.key === "D") {
+      e.preventDefault();
+      moveNameCursor(1);
+      return true;
+    }
+    if (e.key === "ArrowUp" || e.code === "ArrowUp" || e.key === "w" || e.key === "W") {
+      e.preventDefault();
+      cycleNameChar(1);
+      return true;
+    }
+    if (e.key === "ArrowDown" || e.code === "ArrowDown" || e.key === "s" || e.key === "S") {
+      e.preventDefault();
+      cycleNameChar(-1);
+      return true;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      confirmNameEntry();
+      return true;
+    }
+    if (e.key === "Backspace") {
+      e.preventDefault();
+      if (nameCursor > 0 && nameChars[nameCursor] === "A") nameCursor -= 1;
+      nameChars[nameCursor] = "A";
+      renderNameSlots();
+      return true;
+    }
+    if (e.key === " " || e.code === "Space") {
+      e.preventDefault();
+      typeNameChar(" ");
+      return true;
+    }
+    if (e.key && e.key.length === 1) {
+      const up = e.key.toUpperCase();
+      if (NAME_CHARS.includes(up)) {
+        e.preventDefault();
+        typeNameChar(up);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function goGameOver() {
+    setHighScore();
+    if (qualifiesForHiscore(score)) {
+      beginNameEntry();
+    } else {
+      state = "gameover";
+      showOverlay("GAME OVER", "Enter / Tap to play again", "game-over");
+      renderScoreboard();
+      setMusicMood("gameover");
     }
   }
 
@@ -1928,7 +2132,9 @@ import * as THREE from "three";
     initActors3D();
     refreshPelletVisibility();
     state = "ready";
-    showOverlay("READY!", "Press Enter or Tap to Start", "ready");
+    showOverlay("READY!", "Press Enter or Tap to Start · H = scores", "ready");
+    hideNameEntry();
+    hideScoreboard();
     setMusicMood("ready");
     updateHud();
 
@@ -2229,9 +2435,7 @@ import * as THREE from "three";
       dyingTimer -= dt;
       if (dyingTimer <= 0) {
         if (lives <= 0) {
-          state = "gameover";
-          showOverlay("GAME OVER", "Enter / Tap to play again", "game-over");
-          setMusicMood("gameover");
+          goGameOver();
         } else {
           resetActors();
           state = "ready";
@@ -2290,8 +2494,9 @@ import * as THREE from "three";
   function loop(ts, frame) {
     const dt = Math.min((ts - lastTs) / 1000, 0.05);
     lastTs = ts || performance.now();
-    if (state === "ready" || state === "paused" || state === "won" || state === "gameover") {
+    if (state === "ready" || state === "paused" || state === "won" || state === "gameover" || state === "entername") {
       flashTimer += dt;
+      if (state === "entername") renderNameSlots();
     }
     update(dt);
     tickMusic(dt);
@@ -2320,6 +2525,10 @@ import * as THREE from "three";
   }
 
   function onStartAction() {
+    if (state === "entername") {
+      confirmNameEntry();
+      return;
+    }
     if (state === "ready") beginPlay();
     else if (state === "gameover") startLevel(true);
     else if (state === "won") {
@@ -2332,6 +2541,10 @@ import * as THREE from "three";
     "keydown",
     (e) => {
       ensureAudio();
+      if (state === "entername") {
+        handleNameEntryKey(e);
+        return;
+      }
       const dir = dirFromKey(e.key, e.code);
       if (dir) {
         e.preventDefault();
@@ -2348,6 +2561,7 @@ import * as THREE from "three";
         if (state === "playing") {
           state = "paused";
           showOverlay("PAUSED", "Shift to resume", "");
+          hideScoreboard();
           setMusicMood("paused");
         } else if (state === "paused") {
           state = "playing";
@@ -2362,7 +2576,14 @@ import * as THREE from "three";
         e.preventDefault();
         if (e.repeat) return;
         cycleVlTone(1);
+      } else if (e.key === "h" || e.key === "H") {
+        e.preventDefault();
+        if (state === "ready" || state === "gameover") {
+          if (scoreboardEl && !scoreboardEl.classList.contains("hidden")) hideScoreboard();
+          else renderScoreboard();
+        }
       } else if (e.key === "Escape") {
+        if (state === "entername") return;
         startLevel(true);
       }
     },
@@ -2385,6 +2606,7 @@ import * as THREE from "three";
       const t = e.changedTouches[0];
       touchStart = { x: t.clientX, y: t.clientY, t: performance.now() };
       if (state === "ready" || state === "gameover" || state === "won") onStartAction();
+      // ignore during entername — use name controls
     },
     { passive: true }
   );
@@ -2392,6 +2614,10 @@ import * as THREE from "three";
   stage.addEventListener(
     "touchend",
     (e) => {
+      if (state === "entername") {
+        touchStart = null;
+        return;
+      }
       if (!touchStart) return;
       const t = e.changedTouches[0];
       const dx = t.clientX - touchStart.x;
@@ -2435,8 +2661,12 @@ import * as THREE from "three";
     { passive: true }
   );
 
-  overlay.addEventListener("click", onStartAction);
+  overlay.addEventListener("click", (e) => {
+    if (state === "entername") return;
+    onStartAction();
+  });
   stage.addEventListener("click", () => {
+    if (state === "entername") return;
     if (state === "ready" || state === "gameover" || state === "won") onStartAction();
   });
 
@@ -2448,6 +2678,17 @@ import * as THREE from "three";
     });
   }
 
+  const namePrev = document.getElementById("name-prev");
+  const nameNext = document.getElementById("name-next");
+  const nameUp = document.getElementById("name-up");
+  const nameDown = document.getElementById("name-down");
+  const nameOk = document.getElementById("name-ok");
+  if (namePrev) namePrev.addEventListener("click", (e) => { e.stopPropagation(); if (state === "entername") moveNameCursor(-1); });
+  if (nameNext) nameNext.addEventListener("click", (e) => { e.stopPropagation(); if (state === "entername") moveNameCursor(1); });
+  if (nameUp) nameUp.addEventListener("click", (e) => { e.stopPropagation(); if (state === "entername") cycleNameChar(1); });
+  if (nameDown) nameDown.addEventListener("click", (e) => { e.stopPropagation(); if (state === "entername") cycleNameChar(-1); });
+  if (nameOk) nameOk.addEventListener("click", (e) => { e.stopPropagation(); if (state === "entername") confirmNameEntry(); });
+
   window.addEventListener("resize", resize);
   if (window.visualViewport) {
     window.visualViewport.addEventListener("resize", resize);
@@ -2456,6 +2697,8 @@ import * as THREE from "three";
     new ResizeObserver(resize).observe(stage);
   }
 
+  hiscores = loadHiscores();
+  if (hiscores.length) highScore = hiscores[0].score;
   highEl.textContent = formatScore(highScore);
   updateJumpHud();
   updateToneHud();
