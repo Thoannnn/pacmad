@@ -1597,51 +1597,82 @@ import * as THREE from "three";
     if (!audioCtx) return;
     try {
       const t0 = audioCtx.currentTime + when;
-      const dur = 0.38;
-      // Low noisy "brrrp" — filtered noise + sliding square
+      // Always bitonal: start pitch → different end pitch (varies every jump)
+      const lowPool = [48, 55, 62, 70, 78, 88, 98, 110, 124];
+      const highPool = [130, 147, 165, 185, 208, 233, 262, 294];
+      const goUp = Math.random() < 0.45;
+      let fStart = lowPool[(Math.random() * lowPool.length) | 0];
+      let fEnd = (goUp ? highPool : lowPool)[(Math.random() * (goUp ? highPool : lowPool).length) | 0];
+      // Guarantee two distinct tones
+      let guard = 0;
+      while (Math.abs(fEnd - fStart) < 18 && guard++ < 12) {
+        fEnd = lowPool.concat(highPool)[(Math.random() * (lowPool.length + highPool.length)) | 0];
+      }
+      if (Math.random() < 0.35) {
+        // sometimes drop from high → low instead
+        const tmp = fStart;
+        fStart = Math.max(fStart, fEnd);
+        fEnd = Math.min(tmp, fEnd === fStart ? fStart * 0.55 : fEnd);
+        if (fEnd >= fStart) fEnd = fStart * 0.5;
+      }
+      const dur = 0.28 + Math.random() * 0.28;
+      const wet = 0.35 + Math.random() * 0.4;
+
+      // Tone A → Tone B glide (the bitonal fart)
+      const osc = audioCtx.createOscillator();
+      osc.type = Math.random() < 0.5 ? "sawtooth" : "square";
+      osc.frequency.setValueAtTime(fStart, t0);
+      osc.frequency.linearRampToValueAtTime(fEnd, t0 + dur * 0.85);
+      const og = audioCtx.createGain();
+      og.gain.setValueAtTime(0.0001, t0);
+      og.gain.exponentialRampToValueAtTime(0.28 + Math.random() * 0.12, t0 + 0.02);
+      og.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+
+      // Second partial an octave-ish off for rasp, also slides
+      const osc2 = audioCtx.createOscillator();
+      osc2.type = "triangle";
+      osc2.frequency.setValueAtTime(fStart * (1.5 + Math.random() * 0.4), t0);
+      osc2.frequency.linearRampToValueAtTime(fEnd * (1.3 + Math.random() * 0.5), t0 + dur * 0.85);
+      const og2 = audioCtx.createGain();
+      og2.gain.setValueAtTime(0.0001, t0);
+      og2.gain.exponentialRampToValueAtTime(0.1 + Math.random() * 0.08, t0 + 0.025);
+      og2.gain.exponentialRampToValueAtTime(0.0001, t0 + dur * 0.95);
+
+      // Noise rasp amount varies
       const buf = audioCtx.createBuffer(1, Math.ceil(audioCtx.sampleRate * dur), audioCtx.sampleRate);
       const data = buf.getChannelData(0);
-      let reg = 0xb00b;
+      let reg = (Math.random() * 0xffff) | 1;
       for (let i = 0; i < data.length; i++) {
-        const env = Math.sin((i / data.length) * Math.PI) * (1 - i / data.length * 0.35);
+        const env = Math.sin((i / data.length) * Math.PI);
         reg ^= reg << 7;
         reg ^= reg >>> 9;
         reg ^= reg << 8;
-        const flutter = 0.55 + 0.45 * Math.sin(i * 0.09);
-        data[i] = ((reg & 0xffff) / 0x8000 - 1) * env * flutter;
+        data[i] = ((reg & 0xffff) / 0x8000 - 1) * env;
       }
       const noise = audioCtx.createBufferSource();
       noise.buffer = buf;
       const filter = audioCtx.createBiquadFilter();
-      filter.type = "lowpass";
-      filter.Q.value = 4;
-      filter.frequency.setValueAtTime(180, t0);
-      filter.frequency.exponentialRampToValueAtTime(90, t0 + 0.12);
-      filter.frequency.exponentialRampToValueAtTime(220, t0 + 0.28);
-      filter.frequency.exponentialRampToValueAtTime(70, t0 + dur);
+      filter.type = "bandpass";
+      filter.Q.value = 2 + Math.random() * 4;
+      filter.frequency.setValueAtTime(fStart * 1.2, t0);
+      filter.frequency.linearRampToValueAtTime(fEnd * 1.1, t0 + dur);
       const ng = audioCtx.createGain();
       ng.gain.setValueAtTime(0.0001, t0);
-      ng.gain.exponentialRampToValueAtTime(0.55, t0 + 0.02);
+      ng.gain.exponentialRampToValueAtTime(wet, t0 + 0.02);
       ng.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
 
-      const osc = audioCtx.createOscillator();
-      osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(95, t0);
-      osc.frequency.exponentialRampToValueAtTime(55, t0 + 0.2);
-      osc.frequency.exponentialRampToValueAtTime(40, t0 + dur);
-      const og = audioCtx.createGain();
-      og.gain.setValueAtTime(0.0001, t0);
-      og.gain.exponentialRampToValueAtTime(0.22, t0 + 0.03);
-      og.gain.exponentialRampToValueAtTime(0.0001, t0 + dur * 0.9);
-
+      osc.connect(og);
+      og.connect(audioCtx.destination);
+      osc2.connect(og2);
+      og2.connect(audioCtx.destination);
       noise.connect(filter);
       filter.connect(ng);
       ng.connect(audioCtx.destination);
-      osc.connect(og);
-      og.connect(audioCtx.destination);
-      noise.start(t0);
       osc.start(t0);
       osc.stop(t0 + dur + 0.02);
+      osc2.start(t0);
+      osc2.stop(t0 + dur + 0.02);
+      noise.start(t0);
     } catch (_) {
       /* ignore */
     }
