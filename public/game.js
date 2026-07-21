@@ -189,6 +189,8 @@ import * as THREE from "three";
     decided: false,
     pauseTimer: 0,
     pauseNext: nextGhostPauseDelay(),
+    winPopped: false,
+    winPopAt: -1,
   }));
 
   // ——— Three.js scene ———
@@ -374,6 +376,17 @@ import * as THREE from "three";
   let pacLower = null;
   let lastMouthGap = -1;
   const ghostMeshes = [];
+
+  // Level-clear celebration FX
+  let fxRoot = null;
+  const fxParticles = [];
+  let winFxActive = false;
+  let winFxT = 0;
+  let winFireworkAcc = 0;
+  let winOverlayAt = 0;
+  const confettiGeo = new THREE.BoxGeometry(0.07, 0.11, 0.02);
+  const sparkGeo = new THREE.SphereGeometry(0.055, 6, 4);
+  const WIN_COLORS = [0xff3355, 0xffcc00, 0x33ff66, 0x3399ff, 0xff66ff, 0xffffff, 0xff8800, 0x66ffff];
 
   const camTarget = new THREE.Vector3(COLS / 2, 0, ROWS / 2);
   const camPos = new THREE.Vector3();
@@ -854,6 +867,11 @@ import * as THREE from "three";
     ghosts.forEach((g, i) => {
       const mesh = ghostMeshes[i];
       if (!mesh) return;
+      if (g.winPopped) {
+        mesh.visible = false;
+        if (mesh.userData.question) mesh.userData.question.visible = false;
+        return;
+      }
       mesh.position.x = worldX(g.x);
       mesh.position.z = worldZ(g.y);
       mesh.position.y = 0.35 + Math.sin(flashTimer * 6 + i) * 0.03;
@@ -1412,6 +1430,321 @@ import * as THREE from "three";
       osc.stop(audioCtx.currentTime + duration);
     } catch (_) {
       /* ignore */
+    }
+  }
+
+  function playNoiseBurst(duration = 0.1, gain = 0.05, when = 0) {
+    if (!audioCtx) return;
+    try {
+      const len = Math.max(1, Math.floor(audioCtx.sampleRate * duration));
+      const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = "bandpass";
+      filter.frequency.value = 900 + Math.random() * 1200;
+      filter.Q.value = 0.8;
+      const g = audioCtx.createGain();
+      const t0 = audioCtx.currentTime + when;
+      g.gain.setValueAtTime(gain, t0);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+      src.connect(filter);
+      filter.connect(g);
+      g.connect(audioCtx.destination);
+      src.start(t0);
+      src.stop(t0 + duration + 0.02);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  function playFireworkSfx() {
+    ensureAudio();
+    if (!audioCtx) return;
+    const t = audioCtx.currentTime;
+    try {
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = "sine";
+      o.frequency.setValueAtTime(180 + Math.random() * 120, t);
+      o.frequency.exponentialRampToValueAtTime(700 + Math.random() * 500, t + 0.14);
+      g.gain.setValueAtTime(0.035, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+      o.connect(g);
+      g.connect(audioCtx.destination);
+      o.start(t);
+      o.stop(t + 0.17);
+    } catch (_) {
+      /* ignore */
+    }
+    playNoiseBurst(0.12, 0.07, 0.1);
+    beep(70 + Math.random() * 40, 0.28, "sine", 0.055);
+    beep(220 + Math.random() * 80, 0.1, "triangle", 0.025);
+  }
+
+  function playGhostPopSfx(index) {
+    ensureAudio();
+    const base = [330, 392, 494, 587][index % 4];
+    beep(base, 0.08, "square", 0.045);
+    beep(base * 1.5, 0.12, "triangle", 0.04);
+    beep(base * 2.2, 0.18, "sine", 0.03);
+    playNoiseBurst(0.07, 0.045, 0.02);
+    // silly descending "boing"
+    if (!audioCtx) return;
+    try {
+      const t = audioCtx.currentTime;
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = "sawtooth";
+      o.frequency.setValueAtTime(base * 2, t);
+      o.frequency.exponentialRampToValueAtTime(base * 0.5, t + 0.22);
+      g.gain.setValueAtTime(0.03, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.24);
+      o.connect(g);
+      g.connect(audioCtx.destination);
+      o.start(t);
+      o.stop(t + 0.25);
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  function playWinFanfare() {
+    ensureAudio();
+    const seq = [523, 659, 784, 1046, 784, 1046, 1318, 1568];
+    seq.forEach((f, i) => {
+      setTimeout(() => {
+        beep(f, 0.16, i % 2 ? "triangle" : "square", 0.04);
+        if (i % 3 === 2) playNoiseBurst(0.05, 0.03);
+      }, i * 95);
+    });
+  }
+
+  function ensureFxRoot() {
+    if (fxRoot) return;
+    fxRoot = new THREE.Group();
+    board.add(fxRoot);
+  }
+
+  function clearWinFx() {
+    winFxActive = false;
+    winFxT = 0;
+    winFireworkAcc = 0;
+    winOverlayAt = 0;
+    ghosts.forEach((g) => {
+      g.winPopped = false;
+      g.winPopAt = -1;
+    });
+    if (!fxRoot) return;
+    while (fxRoot.children.length) {
+      const c = fxRoot.children[0];
+      fxRoot.remove(c);
+      if (c.material) {
+        if (c.material.map) c.material.map.dispose();
+        c.material.dispose();
+      }
+    }
+    fxParticles.length = 0;
+  }
+
+  function spawnFxParticle({ geo, color, x, y, z, vx, vy, vz, life, gravity = 5, spin = 0, drag = 0.985 }) {
+    if (fxParticles.length > 520) return;
+    ensureFxRoot();
+    const mat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 1,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, y, z);
+    mesh.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
+    fxRoot.add(mesh);
+    fxParticles.push({
+      mesh,
+      vx,
+      vy,
+      vz,
+      life,
+      maxLife: life,
+      gravity,
+      spin,
+      drag,
+      rx: (Math.random() - 0.5) * spin,
+      ry: (Math.random() - 0.5) * spin,
+      rz: (Math.random() - 0.5) * spin,
+    });
+  }
+
+  function spawnFireworkBurst(wx, wy, wz) {
+    playFireworkSfx();
+    const n = 32 + Math.floor(Math.random() * 28);
+    for (let i = 0; i < n; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const speed = 2.2 + Math.random() * 5.5;
+      spawnFxParticle({
+        geo: sparkGeo,
+        color: WIN_COLORS[Math.floor(Math.random() * WIN_COLORS.length)],
+        x: wx,
+        y: wy,
+        z: wz,
+        vx: Math.sin(phi) * Math.cos(theta) * speed,
+        vy: Math.cos(phi) * speed * 0.85 + 1.2,
+        vz: Math.sin(phi) * Math.sin(theta) * speed,
+        life: 0.65 + Math.random() * 0.9,
+        gravity: 7,
+        spin: 8,
+        drag: 0.97,
+      });
+    }
+  }
+
+  function spawnGhostConfetti(g, ghostIndex) {
+    playGhostPopSfx(ghostIndex);
+    const bx = worldX(g.x);
+    const by = 0.45;
+    const bz = worldZ(g.y);
+    const baseCol = new THREE.Color(g.color || "#ff0000");
+    const n = 55 + Math.floor(Math.random() * 35);
+    for (let i = 0; i < n; i++) {
+      const useGhost = Math.random() < 0.35;
+      const color = useGhost
+        ? baseCol.getHex()
+        : WIN_COLORS[Math.floor(Math.random() * WIN_COLORS.length)];
+      const speed = 1.5 + Math.random() * 6;
+      const theta = Math.random() * Math.PI * 2;
+      const elev = 0.3 + Math.random() * 1.2;
+      spawnFxParticle({
+        geo: confettiGeo,
+        color,
+        x: bx + (Math.random() - 0.5) * 0.2,
+        y: by + Math.random() * 0.3,
+        z: bz + (Math.random() - 0.5) * 0.2,
+        vx: Math.cos(theta) * speed,
+        vy: elev * speed * 0.7 + 2,
+        vz: Math.sin(theta) * speed,
+        life: 1.1 + Math.random() * 1.4,
+        gravity: 9,
+        spin: 14,
+        drag: 0.99,
+      });
+    }
+    // Extra sparkle pop
+    for (let i = 0; i < 18; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const speed = 3 + Math.random() * 4;
+      spawnFxParticle({
+        geo: sparkGeo,
+        color: 0xffffff,
+        x: bx,
+        y: by,
+        z: bz,
+        vx: Math.cos(theta) * speed,
+        vy: 2 + Math.random() * 3,
+        vz: Math.sin(theta) * speed,
+        life: 0.4 + Math.random() * 0.4,
+        gravity: 4,
+        spin: 4,
+      });
+    }
+  }
+
+  function beginLevelWin() {
+    state = "won";
+    ensureAudio();
+    setMusicMood("win");
+    playWinFanfare();
+    clearWinFx();
+    winFxActive = true;
+    winFxT = 0;
+    winFireworkAcc = 0;
+    winOverlayAt = 1.6;
+    hideOverlay();
+
+    const order = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
+    ghosts.forEach((g, i) => {
+      g.winPopped = false;
+      g.pauseTimer = 0;
+      const slot = order.indexOf(i);
+      g.winPopAt = 0.2 + slot * (0.4 + Math.random() * 0.35) + Math.random() * 0.15;
+    });
+
+    // Opening salvo
+    for (let i = 0; i < 4; i++) {
+      setTimeout(() => {
+        if (!winFxActive) return;
+        spawnFireworkBurst(
+          worldX(4 + Math.random() * (COLS - 8)),
+          2.5 + Math.random() * 3.5,
+          worldZ(4 + Math.random() * (ROWS - 8))
+        );
+      }, i * 180);
+    }
+  }
+
+  function updateWinFx(dt) {
+    if (!winFxActive) return;
+    winFxT += dt;
+
+    if (winOverlayAt > 0 && winFxT >= winOverlayAt) {
+      winOverlayAt = 0;
+      showOverlay("YOU WIN!", "Enter / Tap for next level", "win");
+    }
+
+    // Staggered ghost pops → confetti
+    ghosts.forEach((g, i) => {
+      if (g.winPopped || g.winPopAt < 0) return;
+      if (winFxT >= g.winPopAt) {
+        g.winPopped = true;
+        spawnGhostConfetti(g, i);
+      }
+    });
+
+    // Continuous fireworks
+    winFireworkAcc += dt;
+    const interval = 0.18 + Math.random() * 0.22;
+    if (winFireworkAcc >= interval) {
+      winFireworkAcc = 0;
+      spawnFireworkBurst(
+        worldX(2 + Math.random() * (COLS - 4)),
+        2.2 + Math.random() * 4.5,
+        worldZ(2 + Math.random() * (ROWS - 4))
+      );
+      // Occasional double burst
+      if (Math.random() < 0.35) {
+        spawnFireworkBurst(
+          worldX(2 + Math.random() * (COLS - 4)),
+          3 + Math.random() * 3,
+          worldZ(2 + Math.random() * (ROWS - 4))
+        );
+      }
+    }
+
+    // Integrate particles
+    for (let i = fxParticles.length - 1; i >= 0; i--) {
+      const p = fxParticles[i];
+      p.life -= dt;
+      if (p.life <= 0) {
+        fxRoot.remove(p.mesh);
+        p.mesh.material.dispose();
+        fxParticles.splice(i, 1);
+        continue;
+      }
+      p.vy -= p.gravity * dt;
+      p.vx *= p.drag;
+      p.vz *= p.drag;
+      p.mesh.position.x += p.vx * dt;
+      p.mesh.position.y += p.vy * dt;
+      p.mesh.position.z += p.vz * dt;
+      p.mesh.rotation.x += p.rx * dt;
+      p.mesh.rotation.y += p.ry * dt;
+      p.mesh.rotation.z += p.rz * dt;
+      p.mesh.material.opacity = Math.max(0, p.life / p.maxLife);
+      const s = 0.6 + 0.4 * (p.life / p.maxLife);
+      p.mesh.scale.setScalar(s);
     }
   }
 
@@ -2312,6 +2645,8 @@ import * as THREE from "three";
       g.speed = 3.2 + Math.min(level - 1, 4) * 0.075;
       g.pauseTimer = 0;
       g.pauseNext = nextGhostPauseDelay();
+      g.winPopped = false;
+      g.winPopAt = -1;
     });
 
     releaseTimer = 0;
@@ -2330,6 +2665,7 @@ import * as THREE from "three";
       // Keep progress: restart at saved level even after death
       level = loadSavedLevel();
     }
+    clearWinFx();
     cloneMaze();
     saveLevel();
     modeIndex = 0;
@@ -2582,10 +2918,7 @@ import * as THREE from "three";
     setHighScore();
     updateHud();
     if (pelletCount <= 0) {
-      state = "won";
-      showOverlay("YOU WIN!", "Enter / Tap for next level", "win");
-      setMusicMood("win");
-      beep(880, 0.2, "triangle", 0.05);
+      beginLevelWin();
     }
   }
 
@@ -2736,6 +3069,7 @@ import * as THREE from "three";
       flashTimer += dt;
       if (state === "entername") renderNameSlots();
     }
+    if (state === "won") updateWinFx(dt);
     update(dt);
     tickMusic(dt);
     syncActors3D();
