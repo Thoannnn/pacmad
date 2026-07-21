@@ -167,9 +167,11 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 0.55rem;
   pointer-events: auto;
 }
 
+.ar-btn,
 .jump-btn {
   min-width: 5.5rem;
   height: 28px;
@@ -184,6 +186,42 @@ body {
   cursor: pointer;
   display: grid;
   place-items: center;
+}
+
+.ar-btn {
+  border-color: #2a8a6a;
+  color: #7dffe0;
+  background: #0a221c;
+}
+
+.ar-btn.active {
+  border-color: #ffd700;
+  color: #ffd700;
+  background: #2a2210;
+}
+
+.ar-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.jump-btn:hover,
+.ar-btn:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.jump-btn.armed {
+  border-color: #ffd700;
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.35);
+}
+
+body.ar-mode .stage {
+  background: transparent;
+}
+
+body.ar-mode .hud,
+body.ar-mode .footer {
+  background: transparent;
 }
 
 .jump-btn:active,
@@ -220,14 +258,23 @@ body {
   font-size: 0.42rem;
   letter-spacing: 0.12em;
   color: #7ec8ff;
-  opacity: 0;
-  transition: opacity 0.2s ease;
+  opacity: 1;
   text-shadow: 0 1px 0 #000;
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid transparent;
 }
 
-.vl-tone.show {
-  opacity: 1;
+.vl-tone:hover,
+.vl-tone:focus-visible {
+  color: #b8e8ff;
+  border-color: #3a6a8a;
+  outline: none;
+}
+
+.vl-tone:active {
+  color: #ffd700;
 }
 
 @keyframes pulse {

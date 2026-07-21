@@ -117,9 +117,8 @@ import * as THREE from "three";
   let musicStep = 0;
   let musicAcc = 0;
   let musicOneShot = null;
-  let vlToneIndex = 1; // Fantasy — classic VL vibe
+  let vlToneIndex = 3; // Flute — start here
   let vlPulseCache = new Map();
-  let toneFlashTimer = 0;
   let jumpTimer = 0; // >0 while airborne
 
   const input = { queue: null, held: null };
@@ -150,14 +149,21 @@ import * as THREE from "three";
 
   // ——— Three.js scene ———
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x030312);
-  scene.fog = new THREE.FogExp2(0x030312, 0.012);
+  const DEFAULT_BG = 0x030312;
+  scene.background = new THREE.Color(DEFAULT_BG);
+  scene.fog = new THREE.FogExp2(DEFAULT_BG, 0.012);
 
   const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 200);
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+  const renderer = new THREE.WebGLRenderer({
+    antialias: true,
+    alpha: true,
+    powerPreference: "high-performance",
+  });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setClearColor(0x000000, 0);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.xr.enabled = true;
   stage.insertBefore(renderer.domElement, overlay);
 
   const hemi = new THREE.HemisphereLight(0x8899ff, 0x111122, 0.85);
@@ -228,10 +234,13 @@ import * as THREE from "three";
     emissive: m.emissive ? m.emissive.clone() : null,
     emissiveIntensity: m.emissiveIntensity,
   }));
-  const bgBackup = scene.background.clone();
-  const fogBackup = scene.fog.color.clone();
+  const bgBackup = new THREE.Color(DEFAULT_BG);
+  const fogBackup = { color: new THREE.Color(DEFAULT_BG), density: 0.012 };
   let tripShuffleTimer = 0;
   let tripActive = false;
+  let arActive = false;
+  const AR_SCALE = 0.042; // ~1.2m wide maze on a table / floor
+  const boardHome = { pos: new THREE.Vector3(), scale: new THREE.Vector3(1, 1, 1) };
 
   function randomHueColor(s = 0.75, l = 0.45) {
     return new THREE.Color().setHSL(Math.random(), s, l);
@@ -246,8 +255,15 @@ import * as THREE from "three";
         m.emissiveIntensity = 0.4 + Math.random() * 0.9;
       }
     });
-    scene.background.copy(randomHueColor(0.7, 0.08));
-    scene.fog.color.copy(scene.background);
+    if (arActive) {
+      scene.background = null;
+      scene.fog = null;
+    } else {
+      if (!scene.background) scene.background = new THREE.Color();
+      scene.background.copy(randomHueColor(0.7, 0.08));
+      if (!scene.fog) scene.fog = new THREE.FogExp2(DEFAULT_BG, fogBackup.density);
+      scene.fog.color.copy(scene.background);
+    }
     hemi.color.copy(randomHueColor(0.6, 0.55));
     hemi.groundColor.copy(randomHueColor(0.5, 0.2));
     sun.color.copy(randomHueColor(0.4, 0.85));
@@ -274,8 +290,16 @@ import * as THREE from "three";
         m.emissiveIntensity = b.emissiveIntensity;
       }
     });
-    scene.background.copy(bgBackup);
-    scene.fog.color.copy(fogBackup);
+    if (arActive) {
+      scene.background = null;
+      scene.fog = null;
+    } else {
+      scene.background = scene.background || new THREE.Color();
+      scene.background.copy(bgBackup);
+      if (!scene.fog) scene.fog = new THREE.FogExp2(fogBackup.color, fogBackup.density);
+      scene.fog.color.copy(fogBackup.color);
+      scene.fog.density = fogBackup.density;
+    }
     hemi.color.set(0x8899ff);
     hemi.groundColor.set(0x111122);
     sun.color.set(0xffffff);
@@ -735,6 +759,7 @@ import * as THREE from "three";
   }
 
   function updateCamera(dt) {
+    if (arActive || renderer.xr.isPresenting) return;
     const focusX = worldX(pacman.x);
     const focusZ = worldZ(pacman.y);
     camTarget.lerp(new THREE.Vector3(focusX, 0.2, focusZ), 1 - Math.pow(0.001, dt));
@@ -751,6 +776,224 @@ import * as THREE from "three";
     camPos.lerp(desired, 1 - Math.pow(0.03, dt));
     camera.position.copy(camPos);
     camera.lookAt(camTarget.x, 0.4, camTarget.z);
+  }
+
+  // ——— WebXR AR (Meta Quest passthrough + mobile AR) ———
+  const arBtn = document.getElementById("ar-btn");
+  let xrSession = null;
+  let hitTestSource = null;
+  let hitTestSourceRequested = false;
+  let arPlaced = false;
+  const reticle = new THREE.Mesh(
+    new THREE.RingGeometry(0.08, 0.1, 32).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0xffd700 })
+  );
+  reticle.matrixAutoUpdate = false;
+  reticle.visible = false;
+  scene.add(reticle);
+
+  function enterArLayout() {
+    arActive = true;
+    boardHome.pos.copy(board.position);
+    boardHome.scale.copy(board.scale);
+    scene.background = null;
+    scene.fog = null;
+    // Table-scale maze floating in front of the player (Quest / floor ref)
+    board.scale.setScalar(AR_SCALE);
+    if (!arPlaced) {
+      board.position.set(0, 0.02, -0.95);
+    }
+    document.body.classList.add("ar-mode");
+    if (arBtn) {
+      arBtn.classList.add("active");
+      arBtn.textContent = "EXIT AR";
+    }
+  }
+
+  function exitArLayout() {
+    arActive = false;
+    arPlaced = false;
+    hitTestSource = null;
+    hitTestSourceRequested = false;
+    reticle.visible = false;
+    board.position.copy(boardHome.pos);
+    board.scale.copy(boardHome.scale);
+    if (!tripActive) {
+      scene.background = new THREE.Color(bgBackup);
+      scene.fog = new THREE.FogExp2(fogBackup.color.getHex(), fogBackup.density);
+    } else {
+      applyTripColors();
+    }
+    document.body.classList.remove("ar-mode");
+    if (arBtn) {
+      arBtn.classList.remove("active");
+      arBtn.textContent = "AR";
+    }
+    resize();
+  }
+
+  function placeBoardAtMatrix(matrix) {
+    const pos = new THREE.Vector3();
+    const quat = new THREE.Quaternion();
+    const scl = new THREE.Vector3();
+    matrix.decompose(pos, quat, scl);
+    board.position.copy(pos);
+    board.quaternion.copy(quat);
+    board.scale.setScalar(AR_SCALE);
+    // Lift slightly so floor meshes don't z-fight
+    board.position.y += 0.01;
+    arPlaced = true;
+    reticle.visible = false;
+  }
+
+  async function startArSession() {
+    if (!navigator.xr) return;
+    ensureAudio();
+    const ua = navigator.userAgent || "";
+    const isQuest = /Quest|OculusBrowser/i.test(ua);
+
+    const trySession = async (init) => {
+      const session = await navigator.xr.requestSession("immersive-ar", init);
+      xrSession = session;
+      try {
+        renderer.xr.setReferenceSpaceType("local-floor");
+      } catch (_) {
+        /* older runtimes */
+      }
+      await renderer.xr.setSession(session);
+      enterArLayout();
+      // On Quest / floor-less local space, drop maze to roughly table height
+      if (!isQuest) {
+        board.position.set(0, 0.02, -0.85);
+      } else {
+        board.position.set(0, 0.05, -1.1);
+      }
+      session.addEventListener("end", () => {
+        xrSession = null;
+        exitArLayout();
+      });
+    };
+
+    try {
+      const sessionInit = {
+        optionalFeatures: ["local-floor", "bounded-floor", "hit-test", "layers"],
+      };
+      if (!isQuest) {
+        sessionInit.optionalFeatures.push("dom-overlay");
+        sessionInit.domOverlay = { root: document.body };
+      }
+      await trySession(sessionInit);
+    } catch (err) {
+      console.warn("AR session failed, retrying minimal", err);
+      try {
+        await trySession({ optionalFeatures: ["local-floor", "hit-test"] });
+      } catch (err2) {
+        console.warn("AR fallback failed", err2);
+        if (arBtn) {
+          arBtn.textContent = "AR N/A";
+          arBtn.disabled = true;
+        }
+      }
+    }
+  }
+
+  function endArSession() {
+    if (xrSession) xrSession.end();
+    else if (renderer.xr.getSession()) renderer.xr.getSession().end();
+  }
+
+  function toggleAr() {
+    if (renderer.xr.isPresenting || arActive) endArSession();
+    else startArSession();
+  }
+
+  function setupArButton() {
+    if (!arBtn) return;
+    const showUnsupported = () => {
+      arBtn.hidden = true;
+    };
+    if (!navigator.xr || !navigator.xr.isSessionSupported) {
+      showUnsupported();
+      return;
+    }
+    navigator.xr
+      .isSessionSupported("immersive-ar")
+      .then((ok) => {
+        if (!ok) {
+          showUnsupported();
+          return;
+        }
+        arBtn.hidden = false;
+        arBtn.disabled = false;
+        arBtn.title = "WebXR AR — Meta Quest passthrough / mobile AR";
+        arBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleAr();
+        });
+      })
+      .catch(showUnsupported);
+  }
+
+  // Quest controllers: trigger/select = jump or start; squeeze = jump
+  function onXrSelect() {
+    ensureAudio();
+    if (state === "ready" || state === "gameover" || state === "won") onStartAction();
+    else if (state === "playing") {
+      if (!arPlaced && reticle.visible) {
+        // Place maze on hit-test reticle (phone AR)
+        placeBoardAtMatrix(reticle.matrix);
+      } else {
+        tryJump();
+      }
+    }
+  }
+
+  {
+    const c0 = renderer.xr.getController(0);
+    const c1 = renderer.xr.getController(1);
+    c0.addEventListener("select", onXrSelect);
+    c1.addEventListener("select", onXrSelect);
+    c0.addEventListener("squeeze", () => tryJump());
+    c1.addEventListener("squeeze", () => tryJump());
+    scene.add(c0);
+    scene.add(c1);
+  }
+
+  function updateArHitTest(frame) {
+    if (!frame || !arActive || arPlaced) return;
+    const session = renderer.xr.getSession();
+    if (!session) return;
+
+    if (!hitTestSourceRequested) {
+      hitTestSourceRequested = true;
+      session.requestReferenceSpace("viewer").then((refSpace) => {
+        session.requestHitTestSource?.({ space: refSpace }).then((source) => {
+          hitTestSource = source;
+        }).catch(() => {
+          // No hit-test (Quest often) — keep fixed placement
+          hitTestSource = null;
+        });
+      });
+      session.addEventListener("end", () => {
+        hitTestSourceRequested = false;
+        hitTestSource = null;
+      });
+    }
+
+    if (!hitTestSource) return;
+    const hitTestResults = frame.getHitTestResults(hitTestSource);
+    if (hitTestResults.length) {
+      const hit = hitTestResults[0];
+      const refSpace = renderer.xr.getReferenceSpace();
+      const pose = hit.getPose(refSpace);
+      if (pose) {
+        reticle.visible = true;
+        reticle.matrix.fromArray(pose.transform.matrix);
+      }
+    } else {
+      reticle.visible = false;
+    }
   }
 
   function hidePelletAt(x, y) {
@@ -1114,7 +1357,6 @@ import * as THREE from "three";
   function cycleVlTone(dir = 1) {
     ensureAudio();
     vlToneIndex = (vlToneIndex + dir + VL_TONES.length) % VL_TONES.length;
-    toneFlashTimer = 2.2;
     updateToneHud();
     // Preview the new voice
     const tone = currentVlTone();
@@ -1126,8 +1368,34 @@ import * as THREE from "three";
   function updateToneHud() {
     const el = document.getElementById("vl-tone");
     if (!el) return;
-    el.textContent = `VL-10 ${currentVlTone().label}`;
-    el.classList.toggle("show", toneFlashTimer > 0);
+    el.textContent = `TONE: ${currentVlTone().label}`;
+    el.classList.add("show");
+  }
+
+  function setupToneHud() {
+    const el = document.getElementById("vl-tone");
+    if (!el) return;
+    el.style.pointerEvents = "auto";
+    el.style.cursor = "pointer";
+    el.title = "Tap to change VL tone";
+    el.setAttribute("role", "button");
+    el.tabIndex = 0;
+    const cycle = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      cycleVlTone(1);
+    };
+    el.addEventListener("click", cycle);
+    el.addEventListener("touchend", (e) => {
+      e.preventDefault();
+      cycle(e);
+    }, { passive: false });
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        cycleVlTone(1);
+      }
+    });
   }
 
   function setMusicMood(mood) {
@@ -1141,10 +1409,6 @@ import * as THREE from "three";
 
   function tickMusic(dt) {
     if (!audioCtx || !musicMaster) return;
-    if (toneFlashTimer > 0) {
-      toneFlashTimer -= dt;
-      if (toneFlashTimer <= 0) updateToneHud();
-    }
 
     const theme = MUSIC[musicMood] || MUSIC.ready;
     if (theme.oneshot && musicOneShot) return;
@@ -1700,9 +1964,9 @@ import * as THREE from "three";
     collideGhosts();
   }
 
-  function loop(ts) {
+  function loop(ts, frame) {
     const dt = Math.min((ts - lastTs) / 1000, 0.05);
-    lastTs = ts;
+    lastTs = ts || performance.now();
     if (state === "ready" || state === "paused" || state === "won" || state === "gameover") {
       flashTimer += dt;
     }
@@ -1710,8 +1974,8 @@ import * as THREE from "three";
     tickMusic(dt);
     syncActors3D();
     updateCamera(dt || 0.016);
+    updateArHitTest(frame);
     renderer.render(scene, camera);
-    requestAnimationFrame(loop);
   }
 
   function dirFromKey(key) {
@@ -1868,10 +2132,11 @@ import * as THREE from "three";
 
   highEl.textContent = formatScore(highScore);
   updateJumpHud();
+  updateToneHud();
+  setupToneHud();
   resize();
+  setupArButton();
   startLevel(true);
-  requestAnimationFrame((ts) => {
-    lastTs = ts;
-    requestAnimationFrame(loop);
-  });
+  lastTs = performance.now();
+  renderer.setAnimationLoop(loop);
 })();

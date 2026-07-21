@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <meta name="description" content="Pacman in real 3D — low walls, floating pellets." />
+  <meta name="description" content="Pacman in real 3D — AR on Meta Quest & mobile." />
   <meta name="theme-color" content="#000000" />
   <title>PAC-MAN 3D</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -37,11 +37,12 @@
 
     <footer class="footer">
       <div class="jump-wrap">
+        <button type="button" id="ar-btn" class="ar-btn" aria-label="Enter AR" hidden>AR</button>
         <button type="button" id="jump-btn" class="jump-btn" aria-label="Jump">JUMP ␣</button>
       </div>
       <div id="lives" class="lives" aria-label="Lives remaining"></div>
-      <p class="hint">Arrows / WASD · Space jump · T = VL-10 tone · Shift pause · Esc restart</p>
-      <p id="vl-tone" class="vl-tone" aria-live="polite">VL-10 FANTASY</p>
+      <p class="hint">Arrows / WASD · Space jump · T = tone · AR = Quest/mobile · Shift pause</p>
+      <p id="vl-tone" class="vl-tone show" aria-live="polite" role="button" tabindex="0">TONE: FLUTE</p>
     </footer>
   </div>
   <script type="importmap">

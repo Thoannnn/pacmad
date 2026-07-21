@@ -3,5 +3,13 @@
   "framework": null,
   "buildCommand": "",
   "outputDirectory": "public",
-  "installCommand": "npm install"
+  "installCommand": "npm install",
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Permissions-Policy", "value": "xr-spatial-tracking=(self)" }
+      ]
+    }
+  ]
 }
