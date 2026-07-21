@@ -2744,6 +2744,7 @@ import * as THREE from "three";
     if (levelSelectEl) levelSelectEl.classList.remove("hidden");
     hideNameEntry();
     hideScoreboard();
+    hideCharSelect();
     renderLevelPick();
   }
 
