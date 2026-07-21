@@ -2061,27 +2061,22 @@ import * as THREE from "three";
     renderer.render(scene, camera);
   }
 
-  function dirFromKey(key) {
-    switch (key) {
-      case "ArrowLeft":
-      case "a":
-      case "A":
-        return DIRS.LEFT;
-      case "ArrowRight":
-      case "d":
-      case "D":
-        return DIRS.RIGHT;
-      case "ArrowUp":
-      case "w":
-      case "W":
-        return DIRS.UP;
-      case "ArrowDown":
-      case "s":
-      case "S":
-        return DIRS.DOWN;
-      default:
-        return null;
+  function dirFromKey(key, code = "") {
+    const k = key || "";
+    const c = code || "";
+    if (k === "ArrowLeft" || c === "ArrowLeft" || k === "a" || k === "A" || c === "KeyA") {
+      return DIRS.LEFT;
     }
+    if (k === "ArrowRight" || c === "ArrowRight" || k === "d" || k === "D" || c === "KeyD") {
+      return DIRS.RIGHT;
+    }
+    if (k === "ArrowUp" || c === "ArrowUp" || k === "w" || k === "W" || c === "KeyW") {
+      return DIRS.UP;
+    }
+    if (k === "ArrowDown" || c === "ArrowDown" || k === "s" || k === "S" || c === "KeyS") {
+      return DIRS.DOWN;
+    }
+    return null;
   }
 
   function onStartAction() {
@@ -2093,47 +2088,55 @@ import * as THREE from "three";
     }
   }
 
-  window.addEventListener("keydown", (e) => {
-    ensureAudio();
-    const dir = dirFromKey(e.key);
-    if (dir) {
-      e.preventDefault();
-      input.queue = dir;
-      input.held = dir;
-      if (state === "ready") onStartAction();
-      return;
-    }
-    if (e.key === "Enter") {
-      e.preventDefault();
-      onStartAction();
-    } else if (e.key === "Shift" || e.code === "ShiftLeft" || e.code === "ShiftRight") {
-      e.preventDefault();
-      if (state === "playing") {
-        state = "paused";
-        showOverlay("PAUSED", "Shift to resume", "");
-        setMusicMood("paused");
-      } else if (state === "paused") {
-        state = "playing";
-        hideOverlay();
-        setMusicMood(frightenedTimer > 0 ? "fright" : "chase");
-      } else onStartAction();
-    } else if (e.key === " " || e.code === "Space") {
-      e.preventDefault();
-      if (e.repeat) return;
-      tryJump();
-    } else if (e.key === "t" || e.key === "T") {
-      e.preventDefault();
-      if (e.repeat) return;
-      cycleVlTone(1);
-    } else if (e.key === "Escape") {
-      startLevel(true);
-    }
-  });
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      ensureAudio();
+      const dir = dirFromKey(e.key, e.code);
+      if (dir) {
+        e.preventDefault();
+        input.queue = dir;
+        input.held = dir;
+        if (state === "ready") onStartAction();
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        onStartAction();
+      } else if (e.key === "Shift" || e.code === "ShiftLeft" || e.code === "ShiftRight") {
+        e.preventDefault();
+        if (state === "playing") {
+          state = "paused";
+          showOverlay("PAUSED", "Shift to resume", "");
+          setMusicMood("paused");
+        } else if (state === "paused") {
+          state = "playing";
+          hideOverlay();
+          setMusicMood(frightenedTimer > 0 ? "fright" : "chase");
+        } else onStartAction();
+      } else if (e.key === " " || e.code === "Space") {
+        e.preventDefault();
+        if (e.repeat) return;
+        tryJump();
+      } else if (e.key === "t" || e.key === "T" || e.code === "KeyT") {
+        e.preventDefault();
+        if (e.repeat) return;
+        cycleVlTone(1);
+      } else if (e.key === "Escape") {
+        startLevel(true);
+      }
+    },
+    { capture: true }
+  );
 
-  window.addEventListener("keyup", (e) => {
-    const dir = dirFromKey(e.key);
-    if (dir && input.held && input.held.name === dir.name) input.held = null;
-  });
+  window.addEventListener(
+    "keyup",
+    (e) => {
+      const dir = dirFromKey(e.key, e.code);
+      if (dir && input.held && input.held.name === dir.name) input.held = null;
+    },
+    { capture: true }
+  );
 
   stage.addEventListener(
     "touchstart",
