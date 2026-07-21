@@ -484,12 +484,18 @@ import * as THREE from "three";
     jawPivot.add(upper);
     jawPivot.add(lower);
 
-    // Dark throat so limbs aren't visible through the open mouth
+    // Dark gullet + plug so legs never show through the open mouth
+    const gulletMat = new THREE.MeshBasicMaterial({ color: 0x140600 });
+    const gullet = new THREE.Mesh(new THREE.SphereGeometry(0.31, 24, 18), gulletMat);
+    gullet.renderOrder = 1;
+    jawPivot.add(gullet);
     const throat = new THREE.Mesh(
-      new THREE.CircleGeometry(0.34, 28),
-      new THREE.MeshBasicMaterial({ color: 0x1a0800, side: THREE.DoubleSide })
+      new THREE.CylinderGeometry(0.33, 0.33, 0.14, 28),
+      gulletMat
     );
-    throat.position.z = -0.02;
+    throat.rotation.x = Math.PI / 2;
+    throat.position.z = 0.05;
+    throat.renderOrder = 2;
     jawPivot.add(throat);
 
     g.add(jawPivot);
@@ -518,7 +524,7 @@ import * as THREE from "three";
     // Arms — outside body on ±X
     function makeArm(side) {
       const pivot = new THREE.Group();
-      pivot.position.set(side * 0.34, 0.02, -0.02);
+      pivot.position.set(side * 0.34, 0.02, -0.08);
       const arm = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.16, 4, 8), limbMat);
       arm.rotation.z = side > 0 ? -Math.PI / 2 : Math.PI / 2;
       arm.position.x = side * 0.14;
@@ -532,16 +538,16 @@ import * as THREE from "three";
       return pivot;
     }
 
-    // Legs sit behind the body so they never show through the mouth
+    // Legs far behind the body — outside mouth view (+Z)
     function makeLeg(side) {
       const pivot = new THREE.Group();
-      pivot.position.set(side * 0.11, -0.3, -0.14);
-      const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.055, 0.14, 4, 8), limbMat);
-      thigh.position.y = -0.12;
+      pivot.position.set(side * 0.1, -0.34, -0.32);
+      const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.12, 4, 8), limbMat);
+      thigh.position.y = -0.1;
       thigh.castShadow = true;
       pivot.add(thigh);
-      const foot = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), limbMat);
-      foot.position.set(0, -0.26, 0.02);
+      const foot = new THREE.Mesh(new THREE.SphereGeometry(0.065, 10, 8), limbMat);
+      foot.position.set(0, -0.22, -0.04);
       foot.castShadow = true;
       pivot.add(foot);
       g.add(pivot);
