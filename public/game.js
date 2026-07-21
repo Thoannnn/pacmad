@@ -1259,7 +1259,7 @@ import * as THREE from "three";
   // --- Casio VL-Tone / VL-10 style engine ---
   // Voices inspired by VL-1/VL-10 multipulse square + linear envelopes + Po/Pi/Sha
   const N = {
-    C3: 130.81, D3: 146.83, E3: 164.81, F3: 174.61, G3: 196.0, A3: 220.0, B3: 246.94,
+    C3: 130.81, D3: 146.83, E3: 164.81, F3: 174.61, Fs3: 185.0, G3: 196.0, A3: 220.0, Bb3: 233.08, B3: 246.94,
     C4: 261.63, D4: 293.66, E4: 329.63, F4: 349.23, G4: 392.0, A4: 440.0, B4: 493.88,
     C5: 523.25, D5: 587.33, E5: 659.25, F5: 698.46, G5: 783.99, A5: 880.0, C6: 1046.5,
   };
@@ -1437,7 +1437,7 @@ import * as THREE from "three";
     }
   }
 
-  // Simple rock-ish VL pattern over 8 eighths: Po _ Pi Sha | Po _ Pi _
+  // Simple VL rock over 8 eighths
   function playVlRhythmHit(step) {
     const s = step % 8;
     if (s === 0) playPo();
@@ -1445,6 +1445,46 @@ import * as THREE from "three";
     else if (s === 3) playSha();
     else if (s === 4) playPo();
     else if (s === 6) playPi();
+  }
+
+  // Soft jazz ride / brushes feel
+  function playJazzRhythmHit(step) {
+    const s = step % 8;
+    if (s === 0) playPo();
+    else if (s === 2) playPi();
+    else if (s === 3) {
+      playPi(0);
+      playSha(0.01);
+    } else if (s === 4) playPo();
+    else if (s === 6) playPi();
+    else if (s === 7) playPi(0);
+  }
+
+  // Bossa nova clave-ish: soft, syncopated
+  function playBossaRhythmHit(step) {
+    const s = step % 16;
+    if (s === 0) playPo();
+    else if (s === 3) playPi();
+    else if (s === 6) {
+      playSha();
+      playPi(0.01);
+    } else if (s === 8) playPo();
+    else if (s === 10) playPi();
+    else if (s === 13) playSha();
+  }
+
+  function playRhythmForStyle(style, step) {
+    if (style === "jazz") playJazzRhythmHit(step);
+    else if (style === "bossa") playBossaRhythmHit(step);
+    else playVlRhythmHit(step);
+  }
+
+  // Quiet chord stab for jazz/bossa color
+  function playCompChord(freqs, dur, vol = 0.12, when = 0) {
+    const tone = currentVlTone();
+    freqs.forEach((f, i) => {
+      if (f) playVlTone(f, dur * 1.2, tone, vol * (1 - i * 0.15), when + i * 0.01);
+    });
   }
 
   const MUSIC = {
@@ -1459,6 +1499,66 @@ import * as THREE from "three";
       lead: [N.C5, N.C5, N.G4, 0, N.E4, N.E4, N.C4, 0, N.F4, N.F4, N.A4, 0, N.G4, N.E4, N.C4, 0],
       bass: [N.C3, 0, N.C3, 0, N.G3, 0, N.G3, 0, N.F3, 0, N.F3, 0, N.G3, 0, N.E3, 0],
       rhythm: true,
+    },
+    // Jazz swing variation — walking bass + chromatic lead
+    chaseJazz: {
+      bpm: 136,
+      swing: 0.22,
+      lead: [
+        N.E5, 0, N.G5, N.A5, N.G5, 0, N.E5, N.D5,
+        N.C5, N.D5, N.E5, 0, N.G4, N.A4, N.C5, 0,
+        N.D5, 0, N.F5, N.G5, N.F5, 0, N.D5, N.C5,
+        N.B4, N.C5, N.D5, 0, N.G4, N.B4, N.D5, 0,
+      ],
+      bass: [
+        N.C3, N.E3, N.F3, N.Fs3, N.G3, N.A3, N.Bb3, N.B3,
+        N.C3, N.B3, N.A3, N.G3, N.F3, N.E3, N.D3, N.G3,
+        N.F3, N.A3, N.Bb3, N.B3, N.C4, N.A3, N.G3, N.F3,
+        N.E3, N.G3, N.A3, N.B3, N.C3, N.E3, N.G3, N.C3,
+      ],
+      comps: [
+        [N.E4, N.G4, N.B4], 0, 0, 0, [N.D4, N.F4, N.A4], 0, 0, 0,
+        [N.C4, N.E4, N.G4], 0, 0, 0, [N.B3, N.D4, N.G4], 0, 0, 0,
+      ],
+      rhythm: "jazz",
+    },
+    // Bossa nova — laid-back syncopation
+    chaseBossa: {
+      bpm: 118,
+      swing: 0.06,
+      lead: [
+        N.G4, 0, 0, N.A4, 0, N.C5, 0, 0,
+        N.B4, 0, N.A4, 0, N.G4, 0, N.E4, 0,
+        N.F4, 0, 0, N.G4, 0, N.A4, 0, 0,
+        N.G4, 0, N.E4, 0, N.C4, 0, N.D4, 0,
+      ],
+      bass: [
+        N.C3, 0, 0, N.G3, 0, 0, N.C3, 0,
+        0, N.G3, 0, 0, N.F3, 0, 0, N.G3,
+        N.F3, 0, 0, N.C3, 0, 0, N.F3, 0,
+        0, N.G3, 0, 0, N.C3, 0, N.G3, 0,
+      ],
+      comps: [
+        [N.E4, N.G4, N.C5], 0, 0, [N.D4, N.G4, N.B4], 0, 0, 0, 0,
+        [N.C4, N.F4, N.A4], 0, 0, [N.B3, N.E4, N.G4], 0, 0, 0, 0,
+      ],
+      rhythm: "bossa",
+    },
+    readyJazz: {
+      bpm: 108,
+      swing: 0.25,
+      lead: [N.E4, 0, N.G4, N.A4, 0, N.G4, 0, N.E4, N.C4, 0, 0, N.D4, 0, N.E4, 0, 0],
+      bass: [N.C3, N.E3, N.G3, N.A3, N.G3, N.E3, N.D3, N.G3, N.C3, 0, N.G3, 0, N.F3, 0, N.G3, 0],
+      comps: [[N.E4, N.G4, N.B4], 0, 0, 0, [N.D4, N.F4, N.A4], 0, 0, 0],
+      rhythm: false,
+    },
+    readyBossa: {
+      bpm: 100,
+      swing: 0.05,
+      lead: [N.G4, 0, 0, N.E4, 0, 0, N.C4, 0, 0, N.D4, 0, N.E4, 0, 0, N.G4, 0],
+      bass: [N.C3, 0, 0, N.G3, 0, 0, N.A3, 0, 0, 0, N.G3, 0, N.F3, 0, N.G3, 0],
+      comps: [[N.E4, N.G4, N.C5], 0, 0, 0, [N.D4, N.G4, N.B4], 0, 0, 0],
+      rhythm: "bossa",
     },
     fright: {
       bpm: 196,
@@ -1495,6 +1595,38 @@ import * as THREE from "three";
     },
   };
 
+  // Cycle VL → Jazz → Bossa over time during play
+  const MUSIC_STYLE_CYCLE = ["vl", "jazz", "bossa"];
+  let musicStyleIndex = 0;
+  let musicStyleTimer = 0;
+  const MUSIC_STYLE_SECS = 28; // seconds per vibe
+
+  function currentMusicStyle() {
+    return MUSIC_STYLE_CYCLE[musicStyleIndex % MUSIC_STYLE_CYCLE.length];
+  }
+
+  function themeForMood(mood) {
+    const style = currentMusicStyle();
+    if (mood === "chase") {
+      if (style === "jazz") return MUSIC.chaseJazz;
+      if (style === "bossa") return MUSIC.chaseBossa;
+      return MUSIC.chase;
+    }
+    if (mood === "ready") {
+      if (style === "jazz") return MUSIC.readyJazz;
+      if (style === "bossa") return MUSIC.readyBossa;
+      return MUSIC.ready;
+    }
+    return MUSIC[mood] || MUSIC.ready;
+  }
+
+  function styleLabel() {
+    const s = currentMusicStyle();
+    if (s === "jazz") return "JAZZ";
+    if (s === "bossa") return "BOSSA";
+    return "VL";
+  }
+
   function currentVlTone() {
     return VL_TONES[vlToneIndex % VL_TONES.length];
   }
@@ -1513,7 +1645,7 @@ import * as THREE from "three";
   function updateToneHud() {
     const el = document.getElementById("vl-tone");
     if (!el) return;
-    el.textContent = `TONE: ${currentVlTone().label}`;
+    el.textContent = `TONE: ${currentVlTone().label} · ${styleLabel()}`;
     el.classList.add("show");
   }
 
@@ -1531,10 +1663,14 @@ import * as THREE from "three";
       cycleVlTone(1);
     };
     el.addEventListener("click", cycle);
-    el.addEventListener("touchend", (e) => {
-      e.preventDefault();
-      cycle(e);
-    }, { passive: false });
+    el.addEventListener(
+      "touchend",
+      (e) => {
+        e.preventDefault();
+        cycle(e);
+      },
+      { passive: false }
+    );
     el.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
@@ -1544,8 +1680,9 @@ import * as THREE from "three";
   }
 
   function setMusicMood(mood) {
-    if (!MUSIC[mood]) return;
-    if (musicMood === mood && !MUSIC[mood].oneshot) return;
+    // chase/ready resolve via themeForMood; others need MUSIC[mood]
+    if (mood !== "chase" && mood !== "ready" && !MUSIC[mood]) return;
+    if (musicMood === mood && !MUSIC[mood]?.oneshot) return;
     musicMood = mood;
     musicStep = 0;
     musicAcc = 0;
@@ -1555,7 +1692,19 @@ import * as THREE from "three";
   function tickMusic(dt) {
     if (!audioCtx || !musicMaster) return;
 
-    const theme = MUSIC[musicMood] || MUSIC.ready;
+    // Rotate VL → Jazz → Bossa while chasing / on ready screen
+    if ((musicMood === "chase" || musicMood === "ready") && state !== "paused") {
+      musicStyleTimer += dt;
+      if (musicStyleTimer >= MUSIC_STYLE_SECS) {
+        musicStyleTimer = 0;
+        musicStyleIndex = (musicStyleIndex + 1) % MUSIC_STYLE_CYCLE.length;
+        musicStep = 0;
+        updateToneHud();
+      }
+    }
+
+    const theme = themeForMood(musicMood);
+    if (!theme) return;
     if (theme.oneshot && musicOneShot) return;
 
     let bpm = theme.bpm;
@@ -1565,16 +1714,25 @@ import * as THREE from "three";
     }
 
     const stepDur = 60 / bpm / 2;
+    const swing = theme.swing || 0;
     musicAcc += dt;
     const tone = currentVlTone();
     while (musicAcc >= stepDur) {
       musicAcc -= stepDur;
       const lead = theme.lead[musicStep % theme.lead.length];
       const bass = theme.bass[musicStep % theme.bass.length];
-      const noteLen = stepDur * 0.9;
-      if (lead) playVlTone(lead, noteLen, tone, 0.58);
-      if (bass) playVlBass(bass, noteLen * 1.15, 0.42);
-      if (theme.rhythm) playVlRhythmHit(musicStep);
+      const noteLen = stepDur * (swing ? 0.75 : 0.9);
+      const when = musicStep % 2 === 1 ? swing * stepDur : 0;
+      if (lead) playVlTone(lead, noteLen, tone, 0.58, when);
+      if (bass) playVlBass(bass, noteLen * 1.15, 0.42, when * 0.5);
+      if (theme.comps) {
+        const comp = theme.comps[musicStep % theme.comps.length];
+        if (comp && Array.isArray(comp)) playCompChord(comp, noteLen * 1.4, 0.11, when);
+      }
+      if (theme.rhythm) {
+        const rstyle = theme.rhythm === true ? "vl" : theme.rhythm;
+        playRhythmForStyle(rstyle, musicStep);
+      }
       musicStep += 1;
       if (theme.oneshot && musicStep >= theme.lead.length) {
         musicOneShot = true;
