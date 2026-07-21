@@ -172,6 +172,7 @@ body {
 }
 
 .ar-btn,
+.recenter-btn,
 .jump-btn {
   min-width: 5.5rem;
   height: 28px;
@@ -200,13 +201,27 @@ body {
   background: #2a2210;
 }
 
-.ar-btn:disabled {
+.recenter-btn {
+  border-color: #8a6a2a;
+  color: #ffd080;
+  background: #221a0a;
+}
+
+.recenter-btn.armed {
+  border-color: #ffd700;
+  color: #ffd700;
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.35);
+}
+
+.ar-btn:disabled,
+.recenter-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
 .jump-btn:hover,
-.ar-btn:hover:not(:disabled) {
+.ar-btn:hover:not(:disabled),
+.recenter-btn:hover:not(:disabled) {
   filter: brightness(1.15);
 }
 

@@ -788,6 +788,7 @@ import * as THREE from "three";
 
   // ——— WebXR AR (Meta Quest passthrough + mobile AR) ———
   const arBtn = document.getElementById("ar-btn");
+  const recenterBtn = document.getElementById("recenter-btn");
   let xrSession = null;
   let hitTestSource = null;
   let hitTestSourceRequested = false;
@@ -819,13 +820,19 @@ import * as THREE from "three";
     camera.updateProjectionMatrix();
   }
 
-  /** Flat on table: keep world-up, only yaw from surface hit. */
+  function updateRecenterHud() {
+    if (!recenterBtn) return;
+    recenterBtn.hidden = !arActive;
+    recenterBtn.classList.toggle("armed", arPlaceMode);
+    recenterBtn.textContent = arPlaceMode ? "TAP PLACE" : "RECENTER";
+  }
+
+  /** Flat on table: keep world-up. */
   function applyBoardOnSurface(matrix, preview) {
     _arMat.copy(matrix);
     _arMat.decompose(_arPos, _arQuat, _arScl);
     board.position.copy(_arPos);
-    board.position.y += 0.002; // sit on table, avoid z-fight
-    // Flatten — horizontal tabletop (ignore surface tilt wobble)
+    board.position.y += 0.002;
     board.rotation.set(0, 0, 0);
     board.quaternion.identity();
     board.scale.setScalar(AR_SCALE);
@@ -834,6 +841,10 @@ import * as THREE from "three";
       arPlaced = true;
       arPlaceMode = false;
       reticle.visible = false;
+      updateRecenterHud();
+      if (overlaySub && state === "ready") {
+        overlaySub.textContent = "Swipe to move · Tap jump · Recenter moves board";
+      }
     }
   }
 
@@ -848,7 +859,6 @@ import * as THREE from "three";
     _arFwd.y = 0;
     if (_arFwd.lengthSq() < 1e-6) _arFwd.set(0, 0, -1);
     _arFwd.normalize();
-    // ~55cm ahead, ~40cm below eye ≈ table height
     board.position.copy(_arPos).addScaledVector(_arFwd, 0.55);
     board.position.y = _arPos.y - 0.42;
     board.rotation.set(0, Math.atan2(_arFwd.x, _arFwd.z), 0);
@@ -857,7 +867,19 @@ import * as THREE from "three";
     arPlaced = true;
     arPlaceMode = false;
     reticle.visible = false;
+    updateRecenterHud();
     return true;
+  }
+
+  function startRecenterMode() {
+    if (!arActive) return;
+    ensureAudio();
+    arPlaceMode = true;
+    arFallbackAt = performance.now();
+    updateRecenterHud();
+    if (overlaySub) {
+      overlaySub.textContent = "Point at table · Tap / Trigger to place board";
+    }
   }
 
   function enterArLayout() {
@@ -877,8 +899,9 @@ import * as THREE from "three";
       arBtn.classList.add("active");
       arBtn.textContent = "EXIT AR";
     }
+    updateRecenterHud();
     if (overlaySub) {
-      overlaySub.textContent = "Look at table · Trigger to place · Squeeze = jump";
+      overlaySub.textContent = "Point at table · Tap to place · then play";
     }
   }
 
@@ -905,6 +928,7 @@ import * as THREE from "three";
       arBtn.classList.remove("active");
       arBtn.textContent = "AR";
     }
+    updateRecenterHud();
     resize();
   }
 
@@ -974,6 +998,7 @@ import * as THREE from "three";
     if (!arBtn) return;
     const showUnsupported = () => {
       arBtn.hidden = true;
+      if (recenterBtn) recenterBtn.hidden = true;
     };
     if (!navigator.xr || !navigator.xr.isSessionSupported) {
       showUnsupported();
@@ -988,30 +1013,38 @@ import * as THREE from "three";
         }
         arBtn.hidden = false;
         arBtn.disabled = false;
-        arBtn.title = "WebXR AR — place maze on your table (Quest / mobile)";
+        arBtn.title = "WebXR AR — Meta Quest / mobile";
         arBtn.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
           toggleAr();
         });
+        if (recenterBtn) {
+          recenterBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            startRecenterMode();
+          });
+        }
       })
       .catch(showUnsupported);
   }
 
   function onXrSelect() {
     ensureAudio();
-    // Place / move board onto surface under reticle
-    if (arActive && reticle.visible) {
-      applyBoardOnSurface(reticle.matrix, false);
-      if (state === "ready") onStartAction();
+    // Only reposition while in place / recenter mode
+    if (arActive && arPlaceMode) {
+      if (reticle.visible) applyBoardOnSurface(reticle.matrix, false);
+      if (state === "ready" && arPlaced) onStartAction();
       return;
     }
+    // Normal play: tap / trigger commands Pacman (not the board)
     if (state === "ready" || state === "gameover" || state === "won") onStartAction();
     else if (state === "playing") tryJump();
   }
 
   function onXrSqueeze() {
-    if (state === "playing") tryJump();
+    if (state === "playing" && !arPlaceMode) tryJump();
   }
 
   {
@@ -1055,6 +1088,12 @@ import * as THREE from "three";
       });
     }
 
+    // Hit-test / reticle only while placing or recentering — otherwise tap controls Pacman
+    if (!arPlaceMode) {
+      reticle.visible = false;
+      return;
+    }
+
     let gotHit = false;
     if (hitTestSource) {
       const hitTestResults = frame.getHitTestResults(hitTestSource);
@@ -1066,18 +1105,14 @@ import * as THREE from "three";
           reticle.visible = true;
           reticle.matrix.fromArray(pose.transform.matrix);
           gotHit = true;
-          // Preview follow until confirmed with trigger
-          if (!arPlaced) {
-            applyBoardOnSurface(reticle.matrix, true);
-            board.visible = true;
-          }
+          applyBoardOnSurface(reticle.matrix, true);
+          board.visible = true;
         }
       }
     }
 
     if (!gotHit) {
       reticle.visible = false;
-      // No surface yet: after 2.5s place a table-height board in front
       if (!arPlaced && performance.now() - arFallbackAt > 2500) {
         placeBoardInFrontOfViewer(frame);
         arFallbackAt = performance.now() + 1e9;
