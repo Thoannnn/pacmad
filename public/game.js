@@ -569,30 +569,35 @@ import * as THREE from "three";
         best = g;
       }
     }
-    return best;
+    return best ? { ghost: best, dist: bestD } : null;
   }
 
   function updatePacEyesLook() {
     const eyes = pacEyes || pacMesh?.userData?.eyes;
     if (!eyes || !pacMesh) return;
-    const target = nearestGhost();
+    const near = nearestGhost();
     let lookX = 0;
     let lookY = 0;
     let lookZ = 1;
-    if (target) {
+    // Closer ghost → bigger eyes (calm at ~8 tiles, panic under ~2)
+    let eyeScale = 1;
+    if (near) {
+      const target = near.ghost;
       const dx = worldX(target.x) - pacMesh.position.x;
       const dy = 0.4 - pacMesh.position.y;
       const dz = worldZ(target.y) - pacMesh.position.z;
       const yaw = pacMesh.rotation.y;
-      // world → local (inverse of rotation.y)
       const lx = dx * Math.cos(yaw) + dz * Math.sin(yaw);
       const lz = -dx * Math.sin(yaw) + dz * Math.cos(yaw);
       const len = Math.hypot(lx, dy, lz) || 1;
       lookX = THREE.MathUtils.clamp(lx / len, -1, 1);
       lookY = THREE.MathUtils.clamp(dy / len, -1, 1);
       lookZ = THREE.MathUtils.clamp(lz / len, -1, 1);
+      const t = THREE.MathUtils.clamp(1 - (near.dist - 1.2) / 6.5, 0, 1);
+      eyeScale = 1 + t * t * 1.35; // up to ~2.35x when very close
     }
     eyes.forEach((e) => {
+      e.white.scale.setScalar(eyeScale);
       e.pupil.position.set(lookX * 0.05, lookY * 0.05, 0.08 + Math.max(0, lookZ) * 0.02);
     });
   }
@@ -656,13 +661,8 @@ import * as THREE from "three";
     } else {
       pacMesh.position.y = baseY + jumpHeight();
     }
-    // Squash/stretch while jumping
-    if (jumpTimer > 0 && state !== "dying") {
-      const h = jumpHeight() / JUMP_HEIGHT;
-      pacMesh.scale.set(1 - h * 0.12, 1 + h * 0.35, 1 - h * 0.12);
-    } else {
-      pacMesh.scale.set(1, 1, 1);
-    }
+    // Stay round while jumping — no squash/stretch
+    pacMesh.scale.set(1, 1, 1);
 
     const yaw = {
       // Mesh forward is +Z; world: right=+X, left=-X, down=+Z, up=-Z
