@@ -1597,24 +1597,13 @@ import * as THREE from "three";
     if (!audioCtx) return;
     try {
       const t0 = audioCtx.currentTime + when;
-      // Always bitonal: start pitch → different end pitch (varies every jump)
+      // Always bitonal: low → high (varies every jump)
       const lowPool = [48, 55, 62, 70, 78, 88, 98, 110, 124];
-      const highPool = [130, 147, 165, 185, 208, 233, 262, 294];
-      const goUp = Math.random() < 0.45;
+      const highPool = [130, 147, 165, 185, 208, 233, 262, 294, 330];
       let fStart = lowPool[(Math.random() * lowPool.length) | 0];
-      let fEnd = (goUp ? highPool : lowPool)[(Math.random() * (goUp ? highPool : lowPool).length) | 0];
-      // Guarantee two distinct tones
-      let guard = 0;
-      while (Math.abs(fEnd - fStart) < 18 && guard++ < 12) {
-        fEnd = lowPool.concat(highPool)[(Math.random() * (lowPool.length + highPool.length)) | 0];
-      }
-      if (Math.random() < 0.35) {
-        // sometimes drop from high → low instead
-        const tmp = fStart;
-        fStart = Math.max(fStart, fEnd);
-        fEnd = Math.min(tmp, fEnd === fStart ? fStart * 0.55 : fEnd);
-        if (fEnd >= fStart) fEnd = fStart * 0.5;
-      }
+      let fEnd = highPool[(Math.random() * highPool.length) | 0];
+      // Guarantee clear upward interval
+      if (fEnd <= fStart + 20) fEnd = fStart + 40 + Math.random() * 80;
       const dur = 0.18 + Math.random() * 0.55; // short toot → long brrrp
       const wet = 0.35 + Math.random() * 0.4;
 
