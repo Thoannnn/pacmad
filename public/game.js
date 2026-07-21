@@ -1615,7 +1615,7 @@ import * as THREE from "three";
         fEnd = Math.min(tmp, fEnd === fStart ? fStart * 0.55 : fEnd);
         if (fEnd >= fStart) fEnd = fStart * 0.5;
       }
-      const dur = 0.28 + Math.random() * 0.28;
+      const dur = 0.18 + Math.random() * 0.55; // short toot → long brrrp
       const wet = 0.35 + Math.random() * 0.4;
 
       // Tone A → Tone B glide (the bitonal fart)
