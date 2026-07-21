@@ -388,6 +388,7 @@ import * as THREE from "three";
   let winFxActive = false;
   let winFxT = 0;
   let winFireworkAcc = 0;
+  let winJoyAcc = 0;
   let winOverlayAt = 0;
   const confettiGeo = new THREE.BoxGeometry(0.07, 0.11, 0.02);
   const sparkGeo = new THREE.SphereGeometry(0.055, 6, 4);
@@ -820,11 +821,17 @@ import * as THREE from "three";
     const baseY = 0.42;
     if (state === "dying") {
       pacMesh.position.y = baseY * Math.max(0, dyingTimer / 1.4);
+      pacMesh.scale.set(1, 1, 1);
     } else {
-      pacMesh.position.y = baseY + jumpHeight();
+      const jh = jumpHeight();
+      pacMesh.position.y = baseY + jh;
+      if (state === "won" && jh > 0) {
+        const t = jh / JUMP_HEIGHT;
+        pacMesh.scale.set(1 - t * 0.18, 1 + t * 0.35, 1 - t * 0.18);
+      } else {
+        pacMesh.scale.set(1, 1, 1);
+      }
     }
-    // Stay round while jumping — no squash/stretch
-    pacMesh.scale.set(1, 1, 1);
 
     const yaw = {
       // Mesh forward is +Z; world: right=+X, left=-X, down=+Z, up=-Z
@@ -834,31 +841,42 @@ import * as THREE from "three";
       left: -Math.PI / 2,
       none: 0,
     }[pacman.dir.name];
-    pacMesh.rotation.y = yaw;
+    pacMesh.rotation.y = state === "won" ? yaw + Math.sin(mouthPhase * 1.1) * 0.55 : yaw;
 
     // Mouth opens forward (+Z wedge), not downward
-    if (state !== "dying") {
+    if (state === "dying") {
+      setPacMouthOpen(0.95);
+    } else if (state === "won") {
+      setPacMouthOpen(0.35 + Math.abs(Math.sin(mouthPhase * 1.6)) * 0.55);
+    } else {
       const halfGap = 0.22 + Math.abs(Math.sin(mouthPhase)) * 0.55;
       setPacMouthOpen(halfGap);
-    } else {
-      setPacMouthOpen(0.95);
     }
     updatePacEyesLook();
 
     // Animate mini arms & legs (swing around X = forward plane)
     const limbs = pacLimbs || pacMesh.userData.limbs;
     if (limbs) {
-      const swing = state === "playing" && jumpTimer <= 0 ? Math.sin(mouthPhase * 1.8) * 0.7 : 0;
       const jump = jumpTimer > 0 ? jumpHeight() / JUMP_HEIGHT : 0;
-      // Arms flap forward/back + raise on jump
-      limbs.leftArm.rotation.y = swing * 0.5;
-      limbs.rightArm.rotation.y = -swing * 0.5;
-      limbs.leftArm.rotation.z = 0.25 + jump * 1.1;
-      limbs.rightArm.rotation.z = -0.25 - jump * 1.1;
-      limbs.leftArm.rotation.x = -jump * 0.4;
-      limbs.rightArm.rotation.x = -jump * 0.4;
-      limbs.leftLeg.rotation.x = -swing * 0.9 + jump * 0.7;
-      limbs.rightLeg.rotation.x = swing * 0.9 + jump * 0.7;
+      if (state === "won") {
+        const joy = Math.sin(mouthPhase * 2.8);
+        limbs.leftArm.rotation.set(-1.1 - jump * 0.3, joy * 0.4, 1.15 + joy * 0.35);
+        limbs.rightArm.rotation.set(-1.1 - jump * 0.3, -joy * 0.4, -1.15 - joy * 0.35);
+        limbs.leftLeg.rotation.set(-0.5 + joy * 0.9 + jump * 0.5, 0, 0.15);
+        limbs.rightLeg.rotation.set(-0.5 - joy * 0.9 + jump * 0.5, 0, -0.15);
+      } else {
+        const swing = state === "playing" && jumpTimer <= 0 ? Math.sin(mouthPhase * 1.8) * 0.7 : 0;
+        limbs.leftArm.rotation.y = swing * 0.5;
+        limbs.rightArm.rotation.y = -swing * 0.5;
+        limbs.leftArm.rotation.z = 0.25 + jump * 1.1;
+        limbs.rightArm.rotation.z = -0.25 - jump * 1.1;
+        limbs.leftArm.rotation.x = -jump * 0.4;
+        limbs.rightArm.rotation.x = -jump * 0.4;
+        limbs.leftLeg.rotation.x = -swing * 0.9 + jump * 0.7;
+        limbs.rightLeg.rotation.x = swing * 0.9 + jump * 0.7;
+        limbs.leftLeg.rotation.z = 0;
+        limbs.rightLeg.rotation.z = 0;
+      }
       if (state === "dying") {
         limbs.leftArm.rotation.set(-0.2, 0, 0.9);
         limbs.rightArm.rotation.set(-0.2, 0, -0.9);
@@ -1537,6 +1555,7 @@ import * as THREE from "three";
     winFxActive = false;
     winFxT = 0;
     winFireworkAcc = 0;
+    winJoyAcc = 0;
     winOverlayAt = 0;
     ghosts.forEach((g) => {
       g.winPopped = false;
@@ -1555,7 +1574,7 @@ import * as THREE from "three";
   }
 
   function spawnFxParticle({ geo, color, x, y, z, vx, vy, vz, life, gravity = 5, spin = 0, drag = 0.985 }) {
-    if (fxParticles.length > 520) return;
+    if (fxParticles.length > 4800) return;
     ensureFxRoot();
     const mat = new THREE.MeshBasicMaterial({
       color,
@@ -1583,13 +1602,13 @@ import * as THREE from "three";
     });
   }
 
-  function spawnFireworkBurst(wx, wy, wz) {
-    playFireworkSfx();
-    const n = 32 + Math.floor(Math.random() * 28);
+  function spawnFireworkBurst(wx, wy, wz, { silent = false } = {}) {
+    if (!silent) playFireworkSfx();
+    const n = 320 + Math.floor(Math.random() * 280);
     for (let i = 0; i < n; i++) {
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
-      const speed = 2.2 + Math.random() * 5.5;
+      const speed = 3.5 + Math.random() * 9;
       spawnFxParticle({
         geo: sparkGeo,
         color: WIN_COLORS[Math.floor(Math.random() * WIN_COLORS.length)],
@@ -1597,12 +1616,12 @@ import * as THREE from "three";
         y: wy,
         z: wz,
         vx: Math.sin(phi) * Math.cos(theta) * speed,
-        vy: Math.cos(phi) * speed * 0.85 + 1.2,
+        vy: Math.cos(phi) * speed * 0.9 + 2,
         vz: Math.sin(phi) * Math.sin(theta) * speed,
-        life: 0.65 + Math.random() * 0.9,
-        gravity: 7,
-        spin: 8,
-        drag: 0.97,
+        life: 0.75 + Math.random() * 1.1,
+        gravity: 8,
+        spin: 12,
+        drag: 0.965,
       });
     }
   }
@@ -1613,34 +1632,34 @@ import * as THREE from "three";
     const by = 0.45;
     const bz = worldZ(g.y);
     const baseCol = new THREE.Color(g.color || "#ff0000");
-    const n = 55 + Math.floor(Math.random() * 35);
+    const n = 550 + Math.floor(Math.random() * 350);
     for (let i = 0; i < n; i++) {
       const useGhost = Math.random() < 0.35;
       const color = useGhost
         ? baseCol.getHex()
         : WIN_COLORS[Math.floor(Math.random() * WIN_COLORS.length)];
-      const speed = 1.5 + Math.random() * 6;
+      const speed = 2.5 + Math.random() * 10;
       const theta = Math.random() * Math.PI * 2;
-      const elev = 0.3 + Math.random() * 1.2;
+      const elev = 0.4 + Math.random() * 1.4;
       spawnFxParticle({
         geo: confettiGeo,
         color,
-        x: bx + (Math.random() - 0.5) * 0.2,
-        y: by + Math.random() * 0.3,
-        z: bz + (Math.random() - 0.5) * 0.2,
+        x: bx + (Math.random() - 0.5) * 0.35,
+        y: by + Math.random() * 0.45,
+        z: bz + (Math.random() - 0.5) * 0.35,
         vx: Math.cos(theta) * speed,
-        vy: elev * speed * 0.7 + 2,
+        vy: elev * speed * 0.75 + 3.5,
         vz: Math.sin(theta) * speed,
-        life: 1.1 + Math.random() * 1.4,
-        gravity: 9,
-        spin: 14,
-        drag: 0.99,
+        life: 1.3 + Math.random() * 1.6,
+        gravity: 10,
+        spin: 18,
+        drag: 0.988,
       });
     }
     // Extra sparkle pop
-    for (let i = 0; i < 18; i++) {
+    for (let i = 0; i < 180; i++) {
       const theta = Math.random() * Math.PI * 2;
-      const speed = 3 + Math.random() * 4;
+      const speed = 4 + Math.random() * 8;
       spawnFxParticle({
         geo: sparkGeo,
         color: 0xffffff,
@@ -1648,13 +1667,20 @@ import * as THREE from "three";
         y: by,
         z: bz,
         vx: Math.cos(theta) * speed,
-        vy: 2 + Math.random() * 3,
+        vy: 3 + Math.random() * 5,
         vz: Math.sin(theta) * speed,
-        life: 0.4 + Math.random() * 0.4,
-        gravity: 4,
-        spin: 4,
+        life: 0.5 + Math.random() * 0.55,
+        gravity: 5,
+        spin: 6,
       });
     }
+  }
+
+  function playJoyChirp() {
+    ensureAudio();
+    const f = 700 + Math.random() * 500;
+    beep(f, 0.07, "square", 0.028);
+    beep(f * 1.35, 0.09, "triangle", 0.022);
   }
 
   function beginLevelWin() {
@@ -1666,7 +1692,9 @@ import * as THREE from "three";
     winFxActive = true;
     winFxT = 0;
     winFireworkAcc = 0;
+    winJoyAcc = 0;
     winOverlayAt = 1.6;
+    jumpTimer = JUMP_DURATION;
     hideOverlay();
 
     const order = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
@@ -1677,22 +1705,37 @@ import * as THREE from "three";
       g.winPopAt = 0.2 + slot * (0.4 + Math.random() * 0.35) + Math.random() * 0.15;
     });
 
-    // Opening salvo
-    for (let i = 0; i < 4; i++) {
+    // Opening salvo — wall of fireworks
+    for (let i = 0; i < 28; i++) {
       setTimeout(() => {
         if (!winFxActive) return;
         spawnFireworkBurst(
-          worldX(4 + Math.random() * (COLS - 8)),
-          2.5 + Math.random() * 3.5,
-          worldZ(4 + Math.random() * (ROWS - 8))
+          worldX(2 + Math.random() * (COLS - 4)),
+          2.2 + Math.random() * 4.5,
+          worldZ(2 + Math.random() * (ROWS - 4)),
+          { silent: i % 3 !== 0 }
         );
-      }, i * 180);
+      }, i * 55);
     }
   }
 
   function updateWinFx(dt) {
     if (!winFxActive) return;
     winFxT += dt;
+    mouthPhase += dt * 18;
+
+    // Pac-Man joy hops
+    if (jumpTimer > 0) {
+      jumpTimer -= dt;
+      if (jumpTimer < 0) jumpTimer = 0;
+    } else {
+      winJoyAcc += dt;
+      if (winJoyAcc >= 0.12 + Math.random() * 0.1) {
+        winJoyAcc = 0;
+        jumpTimer = JUMP_DURATION * (0.75 + Math.random() * 0.2);
+        playJoyChirp();
+      }
+    }
 
     if (winOverlayAt > 0 && winFxT >= winOverlayAt) {
       winOverlayAt = 0;
@@ -1708,22 +1751,17 @@ import * as THREE from "three";
       }
     });
 
-    // Continuous fireworks
+    // Continuous fireworks barrage
     winFireworkAcc += dt;
-    const interval = 0.18 + Math.random() * 0.22;
-    if (winFireworkAcc >= interval) {
+    if (winFireworkAcc >= 0.07) {
       winFireworkAcc = 0;
-      spawnFireworkBurst(
-        worldX(2 + Math.random() * (COLS - 4)),
-        2.2 + Math.random() * 4.5,
-        worldZ(2 + Math.random() * (ROWS - 4))
-      );
-      // Occasional double burst
-      if (Math.random() < 0.35) {
+      const volleys = 3 + ((Math.random() * 3) | 0);
+      for (let v = 0; v < volleys; v++) {
         spawnFireworkBurst(
-          worldX(2 + Math.random() * (COLS - 4)),
-          3 + Math.random() * 3,
-          worldZ(2 + Math.random() * (ROWS - 4))
+          worldX(1 + Math.random() * (COLS - 2)),
+          2 + Math.random() * 5.5,
+          worldZ(1 + Math.random() * (ROWS - 2)),
+          { silent: v > 0 || Math.random() < 0.55 }
         );
       }
     }
